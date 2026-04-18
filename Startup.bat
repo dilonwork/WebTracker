@@ -1,0 +1,1 @@
+npm rebuild sqlite3 && npm run dev
