@@ -22,12 +22,13 @@ app.get('/api/pages', (req, res) => {
 
 // API: Add a new page to track
 app.post('/api/pages', (req, res) => {
-  let { url, prompt, cron_expression, category } = req.body;
+  let { name, url, prompt, cron_expression, category } = req.body;
   if (!url) return res.status(400).json({ error: "URL is required" });
   
   if (!category || category.trim() === '') {
     category = 'Uncategorized';
   }
+  if (!name) name = '';
 
   if (cron_expression && cron_expression.trim() !== '') {
     if (!cron.validate(cron_expression)) {
@@ -38,8 +39,8 @@ app.post('/api/pages', (req, res) => {
   }
 
   db.run(
-    `INSERT INTO pages (url, prompt, cron_expression, category) VALUES (?, ?, ?, ?)`,
-    [url, prompt || "", cron_expression, category],
+    `INSERT INTO pages (name, url, prompt, cron_expression, category) VALUES (?, ?, ?, ?, ?)`,
+    [name, url, prompt || "", cron_expression, category],
     function (err) {
       if (err) return res.status(500).json({ error: err.message });
       
@@ -47,7 +48,7 @@ app.post('/api/pages', (req, res) => {
       if (cron_expression) {
         schedulePage(newId, url, prompt, cron_expression);
       }
-      res.json({ id: newId, url, prompt, cron_expression, category });
+      res.json({ id: newId, name, url, prompt, cron_expression, category });
     }
   );
 });
@@ -65,10 +66,11 @@ app.delete('/api/pages/:id', (req, res) => {
 // API: Update an existing page
 app.put('/api/pages/:id', (req, res) => {
   const id = req.params.id;
-  let { url, prompt, cron_expression, category } = req.body;
+  let { name, url, prompt, cron_expression, category } = req.body;
   
   if (!url) return res.status(400).json({ error: "URL is required" });
   if (!category || category.trim() === '') category = 'Uncategorized';
+  if (!name) name = '';
 
   if (cron_expression && cron_expression.trim() !== '') {
     if (!cron.validate(cron_expression)) {
@@ -79,8 +81,8 @@ app.put('/api/pages/:id', (req, res) => {
   }
 
   db.run(
-    `UPDATE pages SET url = ?, prompt = ?, cron_expression = ?, category = ? WHERE id = ?`,
-    [url, prompt || "", cron_expression, category, id],
+    `UPDATE pages SET name = ?, url = ?, prompt = ?, cron_expression = ?, category = ? WHERE id = ?`,
+    [name, url, prompt || "", cron_expression, category, id],
     function (err) {
       if (err) return res.status(500).json({ error: err.message });
       if (this.changes === 0) return res.status(404).json({ error: "Page not found" });
@@ -90,7 +92,7 @@ app.put('/api/pages/:id', (req, res) => {
       if (cron_expression) {
         schedulePage(id, url, prompt, cron_expression);
       }
-      res.json({ id, url, prompt, cron_expression, category });
+      res.json({ id, name, url, prompt, cron_expression, category });
     }
   );
 });
@@ -109,7 +111,7 @@ app.post('/api/pages/:id/crawl', (req, res) => {
 // API: Get results history
 app.get('/api/results', (req, res) => {
   db.all(`
-    SELECT r.id, r.html_length, r.llm_response, r.crawled_at, p.url, p.prompt 
+    SELECT r.id, r.html_length, r.llm_response, r.crawled_at, p.url, p.name, p.prompt 
     FROM results r 
     JOIN pages p ON r.page_id = p.id 
     ORDER BY r.crawled_at DESC 

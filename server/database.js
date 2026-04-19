@@ -9,6 +9,7 @@ db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS pages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT DEFAULT '',
       url TEXT NOT NULL UNIQUE,
       prompt TEXT,
       cron_expression TEXT,
@@ -16,6 +17,11 @@ db.serialize(() => {
       last_crawled DATETIME
     )
   `);
+
+  // Schema migration: Add name column if it doesn't exist
+  db.run("ALTER TABLE pages ADD COLUMN name TEXT DEFAULT ''", (err) => {
+    // Expected to error if column already exists; safe to ignore
+  });
 
   // History of Gemini analysis results
   db.run(`
