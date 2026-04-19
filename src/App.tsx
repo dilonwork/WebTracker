@@ -23,6 +23,12 @@ interface CrawlResult {
   prompt: string;
 }
 
+const formatDateTime = (dateString: string) => {
+  const d = new Date(dateString + "Z");
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
 function App() {
   const [pages, setPages] = useState<TrackedPage[]>([]);
   const [results, setResults] = useState<CrawlResult[]>([]);
@@ -139,43 +145,37 @@ function App() {
             <p className="no-data">No results yet. Start tracking to see LLM output.</p>
           ) : (
             <>
-              <div className="tabs-container" style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', overflowX: 'auto', paddingBottom: '0.5rem' }}>
+              <div className="tabs-container filter-tabs">
                 {groups.map(g => (
                   <button 
                     key={g} 
-                    className={`btn ${currentTab === g ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-                    style={{ whiteSpace: 'nowrap' }}
+                    className={`filter-tab ${currentTab === g ? 'active' : ''}`}
                     onClick={() => setActiveTab(g)}
                   >
                     {g}
                   </button>
                 ))}
               </div>
-              <div className="table-responsive">
-                <table className="results-table">
-                  <thead>
-                    <tr>
-                      <th>Time</th>
-                      <th>Target URL</th>
-                      <th>Raw length</th>
-                      <th>Gemini Analysis</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredResults.map(r => (
-                      <tr key={r.id}>
-                        <td className="time-col">{new Date(r.crawled_at + "Z").toLocaleString()}</td>
-                        <td className="url-col">{r.name ? `${r.name} (${r.url})` : r.url}</td>
-                        <td>{r.html_length}</td>
-                        <td className="response-col">
-                          <button className="btn btn-primary btn-sm" onClick={() => setSelectedResult(r)}>
-                            View Result
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="result-cards-container">
+                {filteredResults.map(r => (
+                  <div className="result-card" key={r.id}>
+                    <div className="result-card-header">
+                      <div className="result-card-title" title={r.name || r.url}>
+                        <span className="icon">📄</span>
+                        <span className="name">{r.name || r.url}</span>
+                      </div>
+                      <div className="result-card-time">
+                        <span className="icon">🕒</span>
+                        {formatDateTime(r.crawled_at)}
+                      </div>
+                    </div>
+                    <div className="result-card-footer">
+                      <button className="btn btn-primary btn-view" onClick={() => setSelectedResult(r)}>
+                        ✨ View AI Analysis
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </>
           )}

@@ -180,46 +180,141 @@
   color: var(--text-primary);
 }
 
-.table-responsive {
+/* Filter Tabs - Premium Pills */
+.filter-tabs {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 2rem;
   overflow-x: auto;
+  padding-bottom: 0.75rem;
+  scrollbar-width: none;
 }
 
-.results-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9rem;
+.filter-tabs::-webkit-scrollbar {
+  display: none;
 }
 
-.results-table th {
-  text-align: left;
-  padding: 0.75rem;
-  border-bottom: 1px solid var(--border-glass);
+.filter-tab {
+  padding: 0.6rem 1.5rem;
+  border-radius: 30px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--text-secondary);
+  font-size: 0.95rem;
   font-weight: 500;
-}
-
-.results-table td {
-  padding: 1rem 0.75rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  vertical-align: top;
-}
-
-.time-col {
+  cursor: pointer;
   white-space: nowrap;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.filter-tab:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  transform: translateY(-1px);
+}
+
+.filter-tab.active {
+  background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 4px 15px rgba(124, 58, 237, 0.5);
+}
+
+/* Result Cards Modern Layout */
+.result-cards-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1.5rem;
+}
+
+.result-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  backdrop-filter: blur(10px);
+  position: relative;
+  overflow: hidden;
+}
+
+.result-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent-primary), transparent);
+  transform: translateX(-100%);
+  transition: transform 0.6s ease;
+}
+
+.result-card:hover {
+  transform: translateY(-5px);
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 15px 35px -10px rgba(0, 0, 0, 0.6), 0 0 15px rgba(124, 58, 237, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.result-card:hover::before {
+  transform: translateX(100%);
+}
+
+.result-card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.result-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+  font-size: 0.95rem;
+  color: white;
+  width: 100%;
+}
+
+.result-card-title .name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.result-card-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   font-size: 0.8rem;
   color: var(--text-secondary);
+  background: rgba(0, 0, 0, 0.3);
+  padding: 0.35rem 0.85rem;
+  border-radius: 20px;
+  align-self: flex-start;
+  border: 1px solid rgba(255,255,255,0.05);
 }
 
-.url-col {
-  word-break: break-all;
-  max-width: 200px;
-  color: var(--accent-secondary);
+.result-card-footer {
+  margin-top: auto;
 }
 
-.response-col {
-  max-width: 400px;
-  line-height: 1.5;
-  white-space: pre-wrap;
+.btn-view {
+  width: 100%;
+  border-radius: 12px;
+  padding: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .btn {
@@ -402,4 +497,69 @@
 .markdown-body th, .markdown-body td {
   border: 1px solid var(--border-glass);
   padding: 0.5rem;
+}
+
+/* =========================================
+   Mobile Responsiveness
+   ========================================= */
+@media (max-width: 768px) {
+  .app-container {
+    padding: 1rem;
+    align-items: flex-start;
+  }
+
+  .dashboard-hero {
+    padding: 1.5rem;
+  }
+
+  .header-title {
+    font-size: 2rem;
+  }
+
+  .header-subtitle {
+    font-size: 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .input-group {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .url-input {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .detailed-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .item-actions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .meta-bar {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .modal-content {
+    width: 95%;
+    padding: 1.25rem;
+    margin-top: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .result-cards-container {
+    grid-template-columns: 1fr;
+  }
+
+  .btn {
+    padding: 0.75rem 1.25rem;
+  }
 }
