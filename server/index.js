@@ -24,7 +24,7 @@ app.get('/api/pages', (req, res) => {
 app.post('/api/pages', (req, res) => {
   let { name, url, prompt, cron_expression, category } = req.body;
   if (!url) return res.status(400).json({ error: "URL is required" });
-  
+
   if (!category || category.trim() === '') {
     category = 'Uncategorized';
   }
@@ -43,7 +43,7 @@ app.post('/api/pages', (req, res) => {
     [name, url, prompt || "", cron_expression, category],
     function (err) {
       if (err) return res.status(500).json({ error: err.message });
-      
+
       const newId = this.lastID;
       if (cron_expression) {
         schedulePage(newId, url, prompt, cron_expression);
@@ -67,7 +67,7 @@ app.delete('/api/pages/:id', (req, res) => {
 app.put('/api/pages/:id', (req, res) => {
   const id = req.params.id;
   let { name, url, prompt, cron_expression, category } = req.body;
-  
+
   if (!url) return res.status(400).json({ error: "URL is required" });
   if (!category || category.trim() === '') category = 'Uncategorized';
   if (!name) name = '';
@@ -122,7 +122,7 @@ app.get('/api/results', (req, res) => {
   });
 });
 
-const PORT = process.env.PORT || 3002;
+const PORT = process.env.BACKEND_PORT || 8888;
 app.listen(PORT, () => {
   console.log(`Server API listening on http://localhost:${PORT}`);
 });

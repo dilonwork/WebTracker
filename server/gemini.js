@@ -37,7 +37,7 @@ async function analyzeContentWithGemini(contextHtml, promptText) {
       return "No content returned from Gemini.";
     }
   } catch (error) {
-    console.error("Gemini API Error:", error.response?.data || error.message);
+    console.error("Gemini API Error:", (error.response && error.response.data) || error.message);
     return `Error: ${error.message}`;
   }
 }
