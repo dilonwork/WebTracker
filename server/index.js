@@ -13,113 +13,127 @@ app.use(express.json());
 startScheduler();
 
 // API: Get all pages
-app.get('/api/pages', (req, res) => {
-  db.all(`SELECT * FROM pages`, (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
+app.get('/api/pages', async (req, res) => {
+  try {
+    const { rows } = await db.query(`SELECT * FROM pages ORDER BY id ASC`);
     res.json(rows);
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // API: Add a new page to track
-app.post('/api/pages', (req, res) => {
-  let { name, url, prompt, cron_expression, category } = req.body;
-  if (!url) return res.status(400).json({ error: "URL is required" });
+app.post('/api/pages', async (req, res) => {
+  try {
+    let { name, url, prompt, cron_expression, category } = req.body;
+    if (!url) return res.status(400).json({ error: "URL is required" });
 
-  if (!category || category.trim() === '') {
-    category = 'Uncategorized';
-  }
-  if (!name) name = '';
-
-  if (cron_expression && cron_expression.trim() !== '') {
-    if (!cron.validate(cron_expression)) {
-      return res.status(400).json({ error: "Invalid Cron Expression provided" });
+    if (!category || category.trim() === '') {
+      category = 'Uncategorized';
     }
-  } else {
-    cron_expression = null; // empty string becomes null
-  }
+    if (!name) name = '';
 
-  db.run(
-    `INSERT INTO pages (name, url, prompt, cron_expression, category) VALUES (?, ?, ?, ?, ?)`,
-    [name, url, prompt || "", cron_expression, category],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-
-      const newId = this.lastID;
-      if (cron_expression) {
-        schedulePage(newId, url, prompt, cron_expression);
+    if (cron_expression && cron_expression.trim() !== '') {
+      if (!cron.validate(cron_expression)) {
+        return res.status(400).json({ error: "Invalid Cron Expression provided" });
       }
-      res.json({ id: newId, name, url, prompt, cron_expression, category });
+    } else {
+      cron_expression = null; // empty string becomes null
     }
-  );
+
+    const { rows } = await db.query(
+      `INSERT INTO pages (name, url, prompt, cron_expression, category) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [name, url, prompt || "", cron_expression, category]
+    );
+
+    const newId = rows[0].id;
+    if (cron_expression) {
+      schedulePage(newId, url, prompt, cron_expression);
+    }
+    res.json({ id: newId, name, url, prompt, cron_expression, category });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // API: Delete a page
-app.delete('/api/pages/:id', (req, res) => {
-  const id = req.params.id;
-  db.run(`DELETE FROM pages WHERE id = ?`, [id], function (err) {
-    if (err) return res.status(500).json({ error: err.message });
+app.delete('/api/pages/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { rowCount } = await db.query(`DELETE FROM pages WHERE id = $1`, [id]);
     unschedulePage(id);
-    res.json({ success: true, changes: this.changes });
-  });
+    res.json({ success: true, changes: rowCount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // API: Update an existing page
-app.put('/api/pages/:id', (req, res) => {
-  const id = req.params.id;
-  let { name, url, prompt, cron_expression, category } = req.body;
+app.put('/api/pages/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    let { name, url, prompt, cron_expression, category } = req.body;
 
-  if (!url) return res.status(400).json({ error: "URL is required" });
-  if (!category || category.trim() === '') category = 'Uncategorized';
-  if (!name) name = '';
+    if (!url) return res.status(400).json({ error: "URL is required" });
+    if (!category || category.trim() === '') category = 'Uncategorized';
+    if (!name) name = '';
 
-  if (cron_expression && cron_expression.trim() !== '') {
-    if (!cron.validate(cron_expression)) {
-      return res.status(400).json({ error: "Invalid Cron Expression provided" });
-    }
-  } else {
-    cron_expression = null; // empty string becomes null
-  }
-
-  db.run(
-    `UPDATE pages SET name = ?, url = ?, prompt = ?, cron_expression = ?, category = ? WHERE id = ?`,
-    [name, url, prompt || "", cron_expression, category, id],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      if (this.changes === 0) return res.status(404).json({ error: "Page not found" });
-
-      // Reschedule
-      unschedulePage(id);
-      if (cron_expression) {
-        schedulePage(id, url, prompt, cron_expression);
+    if (cron_expression && cron_expression.trim() !== '') {
+      if (!cron.validate(cron_expression)) {
+        return res.status(400).json({ error: "Invalid Cron Expression provided" });
       }
-      res.json({ id, name, url, prompt, cron_expression, category });
+    } else {
+      cron_expression = null; // empty string becomes null
     }
-  );
+
+    const { rowCount } = await db.query(
+      `UPDATE pages SET name = $1, url = $2, prompt = $3, cron_expression = $4, category = $5 WHERE id = $6`,
+      [name, url, prompt || "", cron_expression, category, id]
+    );
+
+    if (rowCount === 0) return res.status(404).json({ error: "Page not found" });
+
+    // Reschedule
+    unschedulePage(id);
+    if (cron_expression) {
+      schedulePage(id, url, prompt, cron_expression);
+    }
+    res.json({ id, name, url, prompt, cron_expression, category });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // API: Manually trigger a crawl for a page
-app.post('/api/pages/:id/crawl', (req, res) => {
-  db.get(`SELECT * FROM pages WHERE id = ?`, [req.params.id], async (err, row) => {
-    if (err || !row) return res.status(404).json({ error: "Page not found" });
+app.post('/api/pages/:id/crawl', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { rows } = await db.query(`SELECT * FROM pages WHERE id = $1`, [id]);
+    if (rows.length === 0) return res.status(404).json({ error: "Page not found" });
 
+    const row = rows[0];
     // Non-blocking kick off
     performCrawl(row.id, row.url, row.prompt);
     res.json({ success: true, message: "Crawl triggered manually." });
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // API: Get results history
-app.get('/api/results', (req, res) => {
-  db.all(`
-    SELECT r.id, r.html_length, r.llm_response, r.crawled_at, p.url, p.name, p.prompt 
-    FROM results r 
-    JOIN pages p ON r.page_id = p.id 
-    ORDER BY r.crawled_at DESC 
-    LIMIT 100
-  `, (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
+app.get('/api/results', async (req, res) => {
+  try {
+    const { rows } = await db.query(`
+      SELECT r.id, r.html_length, r.llm_response, r.crawled_at, p.url, p.name, p.prompt 
+      FROM results r 
+      JOIN pages p ON r.page_id = p.id 
+      ORDER BY r.crawled_at DESC 
+      LIMIT 100
+    `);
     res.json(rows);
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 const PORT = process.env.BACKEND_PORT || 8888;

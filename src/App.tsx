@@ -24,7 +24,10 @@ interface CrawlResult {
 }
 
 const formatDateTime = (dateString: string) => {
-  const d = new Date(dateString + "Z");
+  if (!dateString) return '';
+  const cleanString = dateString.endsWith('Z') ? dateString : dateString + 'Z';
+  const d = new Date(cleanString);
+  if (isNaN(d.getTime())) return dateString;
   const pad = (n: number) => n.toString().padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
@@ -301,7 +304,11 @@ function App() {
             <h2>Analysis Result</h2>
             <div className="meta-bar">
               <span className="badge">🔗 {selectedResult.name ? `${selectedResult.name} (${selectedResult.url})` : selectedResult.url}</span>
-              <span className="badge">⏱️ {new Date(selectedResult.crawled_at + "Z").toLocaleString()}</span>
+              <span className="badge">⏱️ {(() => {
+                const clean = selectedResult.crawled_at.endsWith('Z') ? selectedResult.crawled_at : selectedResult.crawled_at + 'Z';
+                const d = new Date(clean);
+                return isNaN(d.getTime()) ? selectedResult.crawled_at : d.toLocaleString();
+              })()}</span>
             </div>
             <div className="markdown-body">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
