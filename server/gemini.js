@@ -1,14 +1,41 @@
 const axios = require('axios');
 
+const MODEL_NAME = 'gemini-3.1-flash-lite';
+
+// Helper to delay execution
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Helper to post requests with automatic retries on transient errors (like 503 or 429)
+async function postWithRetry(url, data, config = {}, retries = 3, delay = 1500) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await axios.post(url, data, config);
+      return response;
+    } catch (error) {
+      const status = error.response ? error.response.status : null;
+      // Retry on 429 (Too Many Requests) or 5xx server errors (Service Unavailable, etc.)
+      const isTransient = !status || status === 429 || (status >= 500 && status <= 599);
+
+      if (isTransient && i < retries - 1) {
+        console.warn(`[Gemini API] Request failed with status ${status || 'network error'}. Retrying in ${delay}ms... (Attempt ${i + 1}/${retries})`);
+        await sleep(delay);
+        delay *= 2; // Exponential backoff
+      } else {
+        throw error;
+      }
+    }
+  }
+}
+
 async function analyzeContentWithGemini(contextHtml, promptText) {
   const apiKey = process.env.GEMINI_API_KEY;
-  
+
   if (!apiKey) {
     console.error("GEMINI_API_KEY is not set in .env!");
     return "Error: GEMINI_API_KEY is missing.";
   }
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`;
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
   const contentToAnalyze = contextHtml.length > 25000 ? contextHtml.substring(0, 25000) + '... (truncated)' : contextHtml;
 
   try {
@@ -22,7 +49,7 @@ async function analyzeContentWithGemini(contextHtml, promptText) {
       ]
     };
 
-    const response = await axios.post(endpoint, payload, {
+    const response = await postWithRetry(endpoint, payload, {
       headers: { 'Content-Type': 'application/json' }
     });
 
@@ -39,13 +66,13 @@ async function analyzeContentWithGemini(contextHtml, promptText) {
 
 async function analyzeFinancialPortfolio(portfolioData, marketContext) {
   const apiKey = process.env.GEMINI_API_KEY;
-  
+
   if (!apiKey) {
     console.error("GEMINI_API_KEY is not set in .env!");
     return "Error: GEMINI_API_KEY is missing.";
   }
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`;
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
 
   // Format portfolio accounts
   const accountsText = portfolioData.accounts.map(acc => {
@@ -58,7 +85,7 @@ async function analyzeFinancialPortfolio(portfolioData, marketContext) {
   }).join('\n');
 
   // Format latest web tracking crawler insights
-  const marketText = marketContext.length > 0 
+  const marketText = marketContext.length > 0
     ? marketContext.map(m => `* 網頁追蹤項目 [${m.name}] (${m.url}):\n  爬取時間: ${m.crawled_at}\n  趨勢分析: ${m.llm_response}`).join('\n\n')
     : "無（尚未爬取股票或匯率相關資訊）";
 
@@ -76,7 +103,7 @@ ${demandsText}
 ### 3. 外部股市與匯率監控趨勢 (Web Scraped Market Context)
 ${marketText}
 
-請使用繁體中文（Traditional Chinese），為使用者生成一份專業、具體且易讀的「AI 週度理財建議報告」。報告應包含以下結構：
+請使用繁體中文（Traditional Chinese），為使用者生成一份專業、具體且易讀的「AI 週度理財建議報告」。報告應包含以下 structures：
 
 1. 📊 **資產負債總覽與健康診斷**
    - 分析淨資產狀況（總資產 vs 總負債）。
@@ -108,7 +135,7 @@ ${marketText}
       ]
     };
 
-    const response = await axios.post(endpoint, payload, {
+    const response = await postWithRetry(endpoint, payload, {
       headers: { 'Content-Type': 'application/json' }
     });
 
