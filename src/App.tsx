@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import './App.css';
 
 interface TrackedPage {
@@ -69,6 +70,8 @@ function App() {
   const [reports, setReports] = useState<AIReport[]>([]);
   const [pages, setPages] = useState<TrackedPage[]>([]);
   const [results, setResults] = useState<CrawlResult[]>([]);
+  const [historyRecords, setHistoryRecords] = useState<any[]>([]);
+  const [chartData, setChartData] = useState<any[]>([]);
 
   // Loading States
   const [isAdvisorLoading, setIsAdvisorLoading] = useState(false);
@@ -118,6 +121,7 @@ function App() {
   const fetchReports = () => fetch('/api/financials/reports').then(res => res.json()).then(setReports).catch(console.error);
   const fetchPages = () => fetch('/api/pages').then(res => res.json()).then(setPages).catch(console.error);
   const fetchResults = () => fetch('/api/results').then(res => res.json()).then(setResults).catch(console.error);
+  const fetchHistoryAll = () => fetch('/api/financials/history/all').then(res => res.json()).then(setHistoryRecords).catch(console.error);
 
   useEffect(() => {
     fetchAccounts();
@@ -125,12 +129,61 @@ function App() {
     fetchReports();
     fetchPages();
     fetchResults();
+    fetchHistoryAll();
 
     const interval = setInterval(() => {
       fetchResults();
     }, 15000);
     return () => clearInterval(interval);
   }, []);
+
+  // Compute history chart data
+  useEffect(() => {
+    if (historyRecords.length === 0) return;
+    
+    const dateMap: Record<string, any[]> = {};
+    const accountTypeMap: Record<number, { type: string, subtype: string }> = {};
+
+    historyRecords.forEach(r => {
+      accountTypeMap[r.account_id] = { type: r.type, subtype: r.subtype };
+      const dString = r.recorded_at;
+      const cleanString = dString.endsWith('Z') ? dString : dString + 'Z';
+      const dateObj = new Date(cleanString);
+      const dateKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+      
+      if (!dateMap[dateKey]) dateMap[dateKey] = [];
+      dateMap[dateKey].push(r);
+    });
+
+    const sortedDates = Object.keys(dateMap).sort();
+    const finalChartData = [];
+    const currentBalances: Record<number, number> = {};
+
+    for (const date of sortedDates) {
+      const records = dateMap[date];
+      for (const r of records) {
+        currentBalances[r.account_id] = Number(r.balance);
+      }
+
+      let netWorth = 0;
+      let liquidCash = 0;
+      let investments = 0;
+
+      for (const accIdStr of Object.keys(currentBalances)) {
+        const accId = parseInt(accIdStr, 10);
+        const bal = currentBalances[accId];
+        const { type, subtype } = accountTypeMap[accId];
+        
+        if (type === 'asset') netWorth += bal;
+        if (type === 'liability') netWorth -= bal;
+        if (type === 'asset' && (subtype === 'cash' || subtype === 'deposit')) liquidCash += bal;
+        if (type === 'asset' && (subtype === 'stock' || subtype === 'currency')) investments += bal;
+      }
+
+      finalChartData.push({ date, netWorth, liquidCash, investments });
+    }
+    setChartData(finalChartData);
+  }, [historyRecords]);
 
   // Compute stats
   const totalAssets = accounts.filter(a => a.type === 'asset').reduce((sum, a) => sum + Number(a.balance), 0);
@@ -427,6 +480,32 @@ function App() {
                   <span>信貸與房貸本息支出</span>
                 </div>
               </div>
+            </div>
+
+            {/* Historical Trend Chart */}
+            <div className="glass-panel" style={{ marginTop: '2rem', marginBottom: '2rem', height: '400px' }}>
+              <h3>📈 資產變化走勢圖 (Historical Trends)</h3>
+              {chartData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                    <XAxis dataKey="date" stroke="rgba(255,255,255,0.7)" />
+                    <YAxis stroke="rgba(255,255,255,0.7)" tickFormatter={(val) => `$${(val / 1000).toFixed(0)}k`} width={80} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
+                      formatter={(value: number) => [`$${value.toLocaleString()}`, '']}
+                    />
+                    <Legend />
+                    <Line type="monotone" dataKey="netWorth" name="淨資產" stroke="#3b82f6" strokeWidth={3} activeDot={{ r: 8 }} />
+                    <Line type="monotone" dataKey="liquidCash" name="流動現金" stroke="#10b981" strokeWidth={3} />
+                    <Line type="monotone" dataKey="investments" name="投資部位" stroke="#f59e0b" strokeWidth={3} />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', opacity: 0.5 }}>
+                  無足夠的歷史資料可顯示走勢
+                </div>
+              )}
             </div>
 
             {/* Cash requirements / alerts */}

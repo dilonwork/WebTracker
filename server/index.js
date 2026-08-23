@@ -232,6 +232,21 @@ app.get('/api/financials/accounts/:id/history', async (req, res) => {
   }
 });
 
+// 4.6. Get all history
+app.get('/api/financials/history/all', async (req, res) => {
+  try {
+    const { rows } = await db.query(`
+      SELECT h.id, h.account_id, h.balance, h.recorded_at, a.type, a.subtype 
+      FROM fin_account_history h
+      JOIN fin_accounts a ON h.account_id = a.id
+      ORDER BY h.recorded_at ASC
+    `);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 5. Delete an account
 app.delete('/api/financials/accounts/:id', async (req, res) => {
   try {
