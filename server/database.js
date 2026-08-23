@@ -70,6 +70,15 @@ const initDb = async () => {
       )
     `);
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS fin_account_history (
+        id SERIAL PRIMARY KEY,
+        account_id INTEGER REFERENCES fin_accounts(id) ON DELETE CASCADE,
+        balance NUMERIC(15, 2) NOT NULL,
+        recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     console.log('PostgreSQL database tables initialized.');
 
     // Seed default accounts if empty
@@ -86,10 +95,16 @@ const initDb = async () => {
       ];
 
       for (const acc of seedAccounts) {
-        await pool.query(
+        const { rows: insertedAccounts } = await pool.query(
           `INSERT INTO fin_accounts (name, institution, type, subtype, balance, currency, monthly_payment, interest_rate)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
           acc
+        );
+        
+        // Record initial history
+        await pool.query(
+          `INSERT INTO fin_account_history (account_id, balance) VALUES ($1, $2)`,
+          [insertedAccounts[0].id, acc[4]]
         );
       }
       console.log('Default financial accounts seeded successfully.');

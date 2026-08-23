@@ -161,6 +161,13 @@ app.post('/api/financials/accounts', async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
       [name, institution || '', type, subtype, balance || 0, currency || 'TWD', monthly_payment || 0, interest_rate || 0]
     );
+    
+    // Record initial history
+    await db.query(
+      `INSERT INTO fin_account_history (account_id, balance) VALUES ($1, $2)`,
+      [rows[0].id, balance || 0]
+    );
+
     res.json({ id: rows[0].id, name, institution, type, subtype, balance, currency, monthly_payment, interest_rate });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -179,6 +186,13 @@ app.put('/api/financials/accounts/:id', async (req, res) => {
       [name, institution, type, subtype, balance, currency, monthly_payment, interest_rate, id]
     );
     if (rowCount === 0) return res.status(404).json({ error: "Account not found" });
+
+    // Record history on update
+    await db.query(
+      `INSERT INTO fin_account_history (account_id, balance) VALUES ($1, $2)`,
+      [id, balance || 0]
+    );
+
     res.json({ id, name, institution, type, subtype, balance, currency, monthly_payment, interest_rate });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -194,8 +208,25 @@ app.put('/api/financials/accounts/batch/balances', async (req, res) => {
     }
     for (const item of balances) {
       await db.query('UPDATE fin_accounts SET balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [item.balance, item.id]);
+      
+      // Record history on batch update
+      await db.query(
+        `INSERT INTO fin_account_history (account_id, balance) VALUES ($1, $2)`,
+        [item.id, item.balance || 0]
+      );
     }
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4.5. Get account history
+app.get('/api/financials/accounts/:id/history', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { rows } = await db.query('SELECT * FROM fin_account_history WHERE account_id = $1 ORDER BY recorded_at ASC', [id]);
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
