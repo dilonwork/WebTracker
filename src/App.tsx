@@ -527,10 +527,10 @@ function App() {
                   <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
                     <XAxis dataKey="date" stroke="rgba(255,255,255,0.7)" />
-                    <YAxis stroke="rgba(255,255,255,0.7)" tickFormatter={(val) => `$${(val / 1000).toFixed(0)}k`} width={80} />
+                    <YAxis stroke="rgba(255,255,255,0.7)" tickFormatter={(val: number) => `$${(val / 1000).toFixed(0)}k`} width={80} />
                     <Tooltip 
                       contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
-                      formatter={(value: number) => [`$${value.toLocaleString()}`, '']}
+                      formatter={(value) => [`$${Number(value).toLocaleString()}`, '']}
                     />
                     <Legend />
                     {(exclusiveChartMetric === 'all' || exclusiveChartMetric === 'netWorth') && (
