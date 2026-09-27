@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import './App.css';
 
 interface TrackedPage {
@@ -75,28 +75,14 @@ function App() {
 
   // Loading States
   const [isAdvisorLoading, setIsAdvisorLoading] = useState(false);
-  const [reportTab, setReportTab] = useState<'today' | 'week' | 'history'>('today');
-  const [activeChartMetric, setActiveChartMetric] = useState<'all' | 'netWorth' | 'liquidCash' | 'investments'>('all');
-  const [exclusiveChartMetric, setExclusiveChartMetric] = useState<'all' | 'netWorth' | 'liquidCash' | 'investments'>('all');
+  // V1 minimal dashboard: hero chart shows one metric at a time
+  const [heroMetric, setHeroMetric] = useState<'netWorth' | 'liquidCash' | 'investments'>('netWorth');
 
-  const handleClickCard = (metric: 'netWorth' | 'liquidCash' | 'investments') => {
-    if (exclusiveChartMetric !== 'all' && exclusiveChartMetric !== metric) {
-      setExclusiveChartMetric('all');
-      setActiveChartMetric(metric);
-    } else {
-      setActiveChartMetric(prev => prev === metric ? 'all' : metric);
-    }
-  };
-
-  const handleDoubleClickCard = (metric: 'netWorth' | 'liquidCash' | 'investments') => {
-    if (exclusiveChartMetric === metric) {
-      setExclusiveChartMetric('all');
-      setActiveChartMetric('all');
-    } else {
-      setExclusiveChartMetric(metric);
-      setActiveChartMetric(metric);
-    }
-  };
+  const HERO_META = {
+    netWorth: { label: '淨資產 NET WORTH', color: '#60a5fa' },
+    liquidCash: { label: '流動現金 LIQUID CASH', color: '#34d399' },
+    investments: { label: '投資部位 INVESTMENTS', color: '#fbbf24' },
+  } as const;
 
   // Form States - Account Maintenance
   const [editBalances, setEditBalances] = useState<Record<number, number>>({});
@@ -220,6 +206,42 @@ function App() {
   const liquidCash = cashAssets + depositAssets;
   const totalMonthlyOutflow = accounts.filter(a => a.type === 'liability').reduce((sum, a) => sum + Number(a.monthly_payment), 0);
   const totalUpcomingDemands = demands.reduce((sum, d) => sum + Number(d.amount), 0);
+
+  // ---- V1 minimal dashboard helpers ----
+  const ACCT_STYLE: Record<string, { icon: string; bg: string }> = {
+    cash: { icon: '🏦', bg: 'rgba(59,130,246,0.15)' },
+    deposit: { icon: '💰', bg: 'rgba(16,185,129,0.15)' },
+    stock: { icon: '📈', bg: 'rgba(245,158,11,0.15)' },
+    currency: { icon: '💵', bg: 'rgba(139,92,246,0.15)' },
+    loan: { icon: '💳', bg: 'rgba(239,68,68,0.15)' },
+    mortgage: { icon: '🏠', bg: 'rgba(236,72,153,0.15)' },
+  };
+
+  const heroValue = heroMetric === 'netWorth' ? netWorth : heroMetric === 'liquidCash' ? liquidCash : (stockAssets + currencyAssets);
+
+  const heroDelta = (() => {
+    if (chartData.length < 2) return null;
+    const first = Number(chartData[0][heroMetric]) || 0;
+    const last = Number(chartData[chartData.length - 1][heroMetric]) || 0;
+    if (!first) return null;
+    const amt = last - first;
+    return { amt, pct: (amt / Math.abs(first)) * 100, up: amt >= 0 };
+  })();
+
+  const v1Greeting = (() => {
+    const h = new Date().getHours();
+    if (h >= 5 && h < 11) return '早安';
+    if (h >= 11 && h < 14) return '午安';
+    if (h >= 14 && h < 18) return '下午好';
+    return '晚上好';
+  })();
+  const v1DateStr = (() => {
+    const d = new Date();
+    const week = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()];
+    return `${d.getMonth() + 1}月${d.getDate()}日 星期${week}`;
+  })();
+
+  const sortedDemands = [...demands].sort((a, b) => a.due_date.localeCompare(b.due_date));
 
   // Trigger AI Advisor
   const handleGenerateAdvisor = async () => {
@@ -460,223 +482,179 @@ function App() {
         
         {/* TAB 1: DASHBOARD */}
         {activeTab === 'dashboard' && (
-          <div className="tab-pane animate-fade-in">
-            <header className="content-header">
-              <h1>理財診斷儀表板</h1>
-              <p>基於您在各家銀行與投資機構的水位部位，提供智能理財決策。</p>
-            </header>
+          <div className="tab-pane animate-fade-in v1-dash">
+            {/* 問候 */}
+            <div className="v1-greet">{v1DateStr} · {v1Greeting}，Dylan</div>
 
-            {/* Financial Overview Cards */}
-            <div className="dashboard-grid">
-              <div 
-                className={`fin-card card-gradient-blue glass-panel ${activeChartMetric === 'netWorth' ? 'active-metric-card' : ''}`}
-                onClick={() => handleClickCard('netWorth')}
-                onDoubleClick={() => handleDoubleClickCard('netWorth')}
-                style={{ cursor: 'pointer', transform: activeChartMetric === 'netWorth' ? 'scale(1.02)' : 'none', border: activeChartMetric === 'netWorth' ? '2px solid #3b82f6' : '1px solid rgba(255,255,255,0.1)' }}
-              >
-                <span className="card-label">淨資產 (Net Worth)</span>
-                <h2 className="card-value">${netWorth.toLocaleString('zh-TW', { minimumFractionDigits: 0 })}</h2>
-                <div className="card-footer">
-                  <span>資產: ${totalAssets.toLocaleString()}</span>
-                  <span style={{ opacity: 0.8 }}>負債: ${totalLiabilities.toLocaleString()}</span>
-                </div>
-              </div>
-
-              <div 
-                className={`fin-card card-gradient-green glass-panel ${activeChartMetric === 'liquidCash' ? 'active-metric-card' : ''}`}
-                onClick={() => handleClickCard('liquidCash')}
-                onDoubleClick={() => handleDoubleClickCard('liquidCash')}
-                style={{ cursor: 'pointer', transform: activeChartMetric === 'liquidCash' ? 'scale(1.02)' : 'none', border: activeChartMetric === 'liquidCash' ? '2px solid #10b981' : '1px solid rgba(255,255,255,0.1)' }}
-              >
-                <span className="card-label">流動現金 (Liquid Cash)</span>
-                <h2 className="card-value">${liquidCash.toLocaleString('zh-TW')}</h2>
-                <div className="card-footer">
-                  <span>現金: ${cashAssets.toLocaleString()}</span>
-                  <span>定存: ${depositAssets.toLocaleString()}</span>
-                </div>
-              </div>
-
-              <div 
-                className={`fin-card card-gradient-gold glass-panel ${activeChartMetric === 'investments' ? 'active-metric-card' : ''}`}
-                onClick={() => handleClickCard('investments')}
-                onDoubleClick={() => handleDoubleClickCard('investments')}
-                style={{ cursor: 'pointer', transform: activeChartMetric === 'investments' ? 'scale(1.02)' : 'none', border: activeChartMetric === 'investments' ? '2px solid #f59e0b' : '1px solid rgba(255,255,255,0.1)' }}
-              >
-                <span className="card-label">投資部位 (Investments)</span>
-                <h2 className="card-value">${(stockAssets + currencyAssets).toLocaleString('zh-TW')}</h2>
-                <div className="card-footer">
-                  <span>股票: ${stockAssets.toLocaleString()}</span>
-                  <span>外幣: ${currencyAssets.toLocaleString()}</span>
-                </div>
-              </div>
-
-              <div className="fin-card card-gradient-red glass-panel">
-                <span className="card-label">每月固定償債</span>
-                <h2 className="card-value">${totalMonthlyOutflow.toLocaleString('zh-TW')}</h2>
-                <div className="card-footer">
-                  <span>信貸與房貸本息支出</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Historical Trend Chart */}
-            <div className="glass-panel" style={{ marginTop: '2rem', marginBottom: '2rem', height: '400px' }}>
-              <h3>📈 資產變化走勢圖 (Historical Trends)</h3>
-              {chartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                    <XAxis dataKey="date" stroke="rgba(255,255,255,0.7)" />
-                    <YAxis stroke="rgba(255,255,255,0.7)" tickFormatter={(val: number) => `$${(val / 1000).toFixed(0)}k`} width={80} />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
-                      formatter={(value) => [`$${Number(value).toLocaleString()}`, '']}
-                    />
-                    <Legend />
-                    {(exclusiveChartMetric === 'all' || exclusiveChartMetric === 'netWorth') && (
-                      <Line type="monotone" dataKey="netWorth" name="淨資產" stroke="#3b82f6" strokeWidth={activeChartMetric === 'all' || activeChartMetric === 'netWorth' ? 3 : 1} strokeOpacity={activeChartMetric === 'all' || activeChartMetric === 'netWorth' ? 1 : 0.2} activeDot={{ r: 8 }} />
-                    )}
-                    {(exclusiveChartMetric === 'all' || exclusiveChartMetric === 'liquidCash') && (
-                      <Line type="monotone" dataKey="liquidCash" name="流動現金" stroke="#10b981" strokeWidth={activeChartMetric === 'all' || activeChartMetric === 'liquidCash' ? 3 : 1} strokeOpacity={activeChartMetric === 'all' || activeChartMetric === 'liquidCash' ? 1 : 0.2} activeDot={{ r: 8 }} />
-                    )}
-                    {(exclusiveChartMetric === 'all' || exclusiveChartMetric === 'investments') && (
-                      <Line type="monotone" dataKey="investments" name="投資部位" stroke="#f59e0b" strokeWidth={activeChartMetric === 'all' || activeChartMetric === 'investments' ? 3 : 1} strokeOpacity={activeChartMetric === 'all' || activeChartMetric === 'investments' ? 1 : 0.2} activeDot={{ r: 8 }} />
-                    )}
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', opacity: 0.5 }}>
-                  無足夠的歷史資料可顯示走勢
+            {/* Hero：主指標 + 走勢 */}
+            <div className="v1-hero glass-panel">
+              <span className="v1-label">{HERO_META[heroMetric].label}</span>
+              <h2 className="v1-big num">${heroValue.toLocaleString('zh-TW')}</h2>
+              {heroDelta && (
+                <div>
+                  <span className={`v1-delta ${heroDelta.up ? 'up' : 'down'}`}>
+                    {heroDelta.up ? '▲' : '▼'} ${Math.abs(Math.round(heroDelta.amt)).toLocaleString('zh-TW')} ({heroDelta.up ? '+' : ''}{heroDelta.pct.toFixed(1)}%) 走勢區間
+                  </span>
                 </div>
               )}
-            </div>
-
-            {/* Cash requirements / alerts */}
-            <div className="dashboard-section-split">
-              <div className="section-col glass-panel" style={{ flex: 1 }}>
-                <h3>💧 未來開支需求與流動性分析</h3>
-                <div className="alert-box" style={{ 
-                  background: liquidCash < totalUpcomingDemands ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                  border: liquidCash < totalUpcomingDemands ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)'
-                }}>
-                  {liquidCash < totalUpcomingDemands ? (
-                    <div>
-                      <strong>⚠️ 流動性警報</strong>: 目前現金+定存水位 (${liquidCash.toLocaleString()}) 小於未來總開支需求 (${totalUpcomingDemands.toLocaleString()})！請盡快調整水位或釋放投資部位。
-                    </div>
-                  ) : (
-                    <div>
-                      <strong>✅ 流動性充裕</strong>: 目前流動現金充裕，足以全額覆蓋未來開支需求。
-                    </div>
-                  )}
-                </div>
-                <div className="summary-list">
-                  <div className="summary-item">
-                    <span>未來開支需求項目總計:</span>
-                    <strong>${totalUpcomingDemands.toLocaleString()} TWD</strong>
-                  </div>
-                  <div className="summary-item">
-                    <span>未支應現金需求筆數:</span>
-                    <strong>{demands.length} 筆</strong>
-                  </div>
-                </div>
-                {demands.length > 0 ? (
-                  <ul className="mini-list" style={{ marginTop: '1rem' }}>
-                    {demands.slice(0, 4).map(d => (
-                      <li key={d.id}>
-                        <span>{d.description}</span>
-                        <span>${d.amount.toLocaleString()} ({d.due_date.substring(0, 10)})</span>
-                      </li>
-                    ))}
-                    {demands.length > 4 && <li style={{ textAlign: 'center', opacity: 0.6 }}>...以及其他 {demands.length - 4} 項需求</li>}
-                  </ul>
+              <div className="v1-chart">
+                {chartData.length > 1 ? (
+                  <ResponsiveContainer width="100%" height={140}>
+                    <AreaChart data={chartData} margin={{ top: 10, right: 6, left: 6, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="v1HeroGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={HERO_META[heroMetric].color} stopOpacity={0.35} />
+                          <stop offset="100%" stopColor={HERO_META[heroMetric].color} stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <XAxis
+                        dataKey="date"
+                        tick={{ fill: 'rgba(255,255,255,0.35)', fontSize: 10 }}
+                        tickLine={false}
+                        axisLine={false}
+                        minTickGap={70}
+                        tickFormatter={(d: string) => d.slice(5).replace('-', '/')}
+                      />
+                      <YAxis hide domain={['auto', 'auto']} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '10px', color: '#f8fafc', fontSize: 12 }}
+                        formatter={(value) => [`$${Number(value).toLocaleString('zh-TW')}`, '']}
+                        labelFormatter={(d) => String(d ?? '')}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey={heroMetric}
+                        stroke={HERO_META[heroMetric].color}
+                        strokeWidth={2.5}
+                        fill="url(#v1HeroGrad)"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
                 ) : (
-                  <p className="no-data-hint">目前無登記未來開支需求。</p>
+                  <div className="v1-chart-empty">累積更多歷史資料後顯示走勢</div>
                 )}
               </div>
-
-              <div className="section-col glass-panel" style={{ flex: 2 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                  <h3>⚡ AI 理財診斷顧問</h3>
-                  <button 
-                    className="btn btn-primary btn-spark" 
-                    onClick={handleGenerateAdvisor}
-                    disabled={isAdvisorLoading}
-                  >
-                    {isAdvisorLoading ? '⚡ AI 正在分析診斷中...' : '⚡ 生成最新理財建議'}
+              <div className="v1-seg">
+                {(['netWorth', 'liquidCash', 'investments'] as const).map(m => (
+                  <button key={m} className={heroMetric === m ? 'on' : ''} onClick={() => setHeroMetric(m)}>
+                    {{ netWorth: '淨資產', liquidCash: '現金', investments: '投資' }[m]}
                   </button>
-                </div>
-
-                {reports.length > 0 ? (
-                  <div className="advisor-report-view">
-                    <div className="report-header">
-                      <span>📅 報告時間: {formatDateTime(reports[0].created_at)}</span>
-                    </div>
-                    <div className="markdown-body select-text">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {reports[0].analysis}
-                      </ReactMarkdown>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="advisor-placeholder">
-                    <p>目前無已生成的理財診斷。點擊上方按鈕，讓 LLM 結合您的各部位水位、貸款負債、未來現金支出，以及網頁追蹤的外部趨勢為您提供分析建議！</p>
-                  </div>
-                )}
+                ))}
               </div>
             </div>
 
-            {/* Historical advice log */}
-            {reports.length > 1 && (() => {
-              const now = new Date();
-              const historicalReports = reports.slice(1);
-              const filteredHistoryReports = historicalReports.filter(rep => {
-                if (reportTab === 'history') return true;
-                const dString = rep.created_at;
-                const cleanString = dString.endsWith('Z') ? dString : dString + 'Z';
-                const repDate = new Date(cleanString);
-                
-                if (reportTab === 'today') {
-                  return repDate.getDate() === now.getDate() && 
-                         repDate.getMonth() === now.getMonth() && 
-                         repDate.getFullYear() === now.getFullYear();
-                }
-                if (reportTab === 'week') {
-                  const diffTime = now.getTime() - repDate.getTime();
-                  const diffDays = diffTime / (1000 * 60 * 60 * 24);
-                  return diffDays <= 7;
-                }
-                return true;
-              });
+            {/* 橫滑小卡 */}
+            <div className="v1-stats">
+              <div className="v1-stat glass-panel" onClick={() => setHeroMetric('liquidCash')}>
+                <span className="v1-label">流動現金</span>
+                <div className="v1-stat-v num">${liquidCash.toLocaleString('zh-TW')}</div>
+                <span className="v1-stat-s">現金 + 定存</span>
+              </div>
+              <div className="v1-stat glass-panel" onClick={() => setHeroMetric('investments')}>
+                <span className="v1-label">投資部位</span>
+                <div className="v1-stat-v num">${(stockAssets + currencyAssets).toLocaleString('zh-TW')}</div>
+                <span className="v1-stat-s">股票 + 外幣</span>
+              </div>
+              <div className="v1-stat glass-panel" onClick={() => setActiveTab('demands')}>
+                <span className="v1-label">待繳需求</span>
+                <div className="v1-stat-v num">${totalUpcomingDemands.toLocaleString('zh-TW')}</div>
+                <span className="v1-stat-s">{demands.length} 筆待處理 ›</span>
+              </div>
+            </div>
 
-              return (
-                <div className="glass-panel" style={{ marginTop: '2rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.5rem', marginBottom: '1rem' }}>
-                    <h3 style={{ margin: 0 }}>📜 歷史理財顧問建議紀錄</h3>
-                    <div className="report-tabs" style={{ display: 'flex', gap: '1rem' }}>
-                      <button className={`tab-btn ${reportTab === 'today' ? 'active' : ''}`} onClick={() => setReportTab('today')} style={{ background: 'none', border: 'none', color: reportTab === 'today' ? '#3b82f6' : 'white', cursor: 'pointer', fontWeight: reportTab === 'today' ? 'bold' : 'normal' }}>本日</button>
-                      <button className={`tab-btn ${reportTab === 'week' ? 'active' : ''}`} onClick={() => setReportTab('week')} style={{ background: 'none', border: 'none', color: reportTab === 'week' ? '#3b82f6' : 'white', cursor: 'pointer', fontWeight: reportTab === 'week' ? 'bold' : 'normal' }}>本週</button>
-                      <button className={`tab-btn ${reportTab === 'history' ? 'active' : ''}`} onClick={() => setReportTab('history')} style={{ background: 'none', border: 'none', color: reportTab === 'history' ? '#3b82f6' : 'white', cursor: 'pointer', fontWeight: reportTab === 'history' ? 'bold' : 'normal' }}>歷史紀錄</button>
+            {/* 流動性狀態 */}
+            <div className={`v1-banner ${liquidCash < totalUpcomingDemands ? 'warn' : 'ok'}`}>
+              <span>{liquidCash < totalUpcomingDemands ? '⚠️' : '✅'}</span>
+              <span>
+                {liquidCash < totalUpcomingDemands
+                  ? <><strong>流動性不足</strong>：現金水位低於未來開支需求 ${totalUpcomingDemands.toLocaleString('zh-TW')}</>
+                  : <><strong>流動性充裕</strong>：現金水位可覆蓋未來開支需求</>}
+              </span>
+            </div>
+
+            {/* 我的帳戶 */}
+            <div className="v1-sec">
+              <div className="v1-sec-h">
+                <h3>我的帳戶</h3>
+                <span onClick={() => setActiveTab('maintenance')}>全部 {accounts.length} ›</span>
+              </div>
+              {accounts.slice(0, 6).map(a => {
+                const st = ACCT_STYLE[a.subtype] || ACCT_STYLE.cash;
+                return (
+                  <div key={a.id} className="v1-row glass-panel" onClick={() => setActiveTab('maintenance')}>
+                    <div className="v1-ic" style={{ background: st.bg }}>{st.icon}</div>
+                    <div>
+                      <div className="v1-row-n">{a.name}</div>
+                      <div className="v1-row-d">{a.institution}</div>
                     </div>
+                    <div className="v1-row-b num">${Number(a.balance).toLocaleString('zh-TW')}</div>
+                    <div className="v1-chev">›</div>
                   </div>
-                  <div className="history-reports-list">
-                    {filteredHistoryReports.length > 0 ? filteredHistoryReports.map(rep => (
-                      <details key={rep.id} className="history-report-details">
-                        <summary>理財診斷報告 - {formatDateTime(rep.created_at)}</summary>
-                        <div className="markdown-body select-text" style={{ padding: '1rem', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', marginTop: '0.5rem' }}>
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {rep.analysis}
-                          </ReactMarkdown>
-                        </div>
-                      </details>
-                    )) : (
-                      <p style={{ opacity: 0.6, textAlign: 'center', padding: '1rem 0' }}>此區間無建議紀錄。</p>
-                    )}
-                  </div>
+                );
+              })}
+              {accounts.length === 0 && <p className="no-data-hint">尚未建立任何帳戶。</p>}
+            </div>
+
+            {/* 近期待繳 */}
+            <div className="v1-sec">
+              <div className="v1-sec-h">
+                <h3>近期待繳</h3>
+                <span onClick={() => setActiveTab('demands')}>全部 ›</span>
+              </div>
+              {sortedDemands.slice(0, 4).map(d => (
+                <div key={d.id} className="v1-bill" onClick={() => setActiveTab('demands')}>
+                  <span className="v1-dot" />
+                  <span className="v1-bill-n">{d.description}</span>
+                  <span className="v1-bill-amt num">${Number(d.amount).toLocaleString('zh-TW')}</span>
+                  <span className="v1-bill-due">{d.due_date.substring(0, 10).slice(5).replace('-', '/')}</span>
                 </div>
-              );
-            })()}
+              ))}
+              {demands.length === 0 && <p className="no-data-hint">目前無登記未來開支需求。</p>}
+            </div>
+
+            {/* AI 診斷（收合） */}
+            <div className="v1-sec">
+              <div className="v1-sec-h">
+                <h3>⚡ AI 理財診斷</h3>
+                <button
+                  className="btn btn-primary btn-spark v1-gen-btn"
+                  onClick={handleGenerateAdvisor}
+                  disabled={isAdvisorLoading}
+                >
+                  {isAdvisorLoading ? '分析中...' : '生成建議'}
+                </button>
+              </div>
+              {reports.length > 0 ? (
+                <details className="v1-details glass-panel">
+                  <summary>最新報告 · {formatDateTime(reports[0].created_at)}</summary>
+                  <div className="markdown-body select-text">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {reports[0].analysis}
+                    </ReactMarkdown>
+                  </div>
+                </details>
+              ) : (
+                <p className="no-data-hint">尚無診斷報告，點擊「生成建議」讓 AI 分析您的財務水位。</p>
+              )}
+              {reports.length > 1 && (
+                <details className="v1-details glass-panel">
+                  <summary>歷史紀錄（{reports.length - 1}）</summary>
+                  {reports.slice(1, 6).map(rep => (
+                    <details key={rep.id} className="v1-details-inner">
+                      <summary>{formatDateTime(rep.created_at)}</summary>
+                      <div className="markdown-body select-text">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {rep.analysis}
+                        </ReactMarkdown>
+                      </div>
+                    </details>
+                  ))}
+                </details>
+              )}
+            </div>
           </div>
         )}
+
 
         {/* TAB 2: MAINTENANCE */}
         {activeTab === 'maintenance' && (
