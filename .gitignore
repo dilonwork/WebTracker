@@ -25,3 +25,6 @@ dist-ssr
 *.env
 
 server/db.sqlite
+
+# local preview screenshots (never commit)
+.screenshots/
