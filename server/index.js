@@ -1,4 +1,5 @@
 require('dotenv').config();
+process.env.TZ = process.env.TZ || 'America/Phoenix';
 const express = require('express');
 const cors = require('cors');
 const db = require('./database');

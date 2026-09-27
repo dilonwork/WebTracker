@@ -75,6 +75,28 @@ function App() {
 
   // Loading States
   const [isAdvisorLoading, setIsAdvisorLoading] = useState(false);
+  const [reportTab, setReportTab] = useState<'today' | 'week' | 'history'>('today');
+  const [activeChartMetric, setActiveChartMetric] = useState<'all' | 'netWorth' | 'liquidCash' | 'investments'>('all');
+  const [exclusiveChartMetric, setExclusiveChartMetric] = useState<'all' | 'netWorth' | 'liquidCash' | 'investments'>('all');
+
+  const handleClickCard = (metric: 'netWorth' | 'liquidCash' | 'investments') => {
+    if (exclusiveChartMetric !== 'all' && exclusiveChartMetric !== metric) {
+      setExclusiveChartMetric('all');
+      setActiveChartMetric(metric);
+    } else {
+      setActiveChartMetric(prev => prev === metric ? 'all' : metric);
+    }
+  };
+
+  const handleDoubleClickCard = (metric: 'netWorth' | 'liquidCash' | 'investments') => {
+    if (exclusiveChartMetric === metric) {
+      setExclusiveChartMetric('all');
+      setActiveChartMetric('all');
+    } else {
+      setExclusiveChartMetric(metric);
+      setActiveChartMetric(metric);
+    }
+  };
 
   // Form States - Account Maintenance
   const [editBalances, setEditBalances] = useState<Record<number, number>>({});
@@ -446,7 +468,12 @@ function App() {
 
             {/* Financial Overview Cards */}
             <div className="dashboard-grid">
-              <div className="fin-card card-gradient-blue glass-panel">
+              <div 
+                className={`fin-card card-gradient-blue glass-panel ${activeChartMetric === 'netWorth' ? 'active-metric-card' : ''}`}
+                onClick={() => handleClickCard('netWorth')}
+                onDoubleClick={() => handleDoubleClickCard('netWorth')}
+                style={{ cursor: 'pointer', transform: activeChartMetric === 'netWorth' ? 'scale(1.02)' : 'none', border: activeChartMetric === 'netWorth' ? '2px solid #3b82f6' : '1px solid rgba(255,255,255,0.1)' }}
+              >
                 <span className="card-label">淨資產 (Net Worth)</span>
                 <h2 className="card-value">${netWorth.toLocaleString('zh-TW', { minimumFractionDigits: 0 })}</h2>
                 <div className="card-footer">
@@ -455,7 +482,12 @@ function App() {
                 </div>
               </div>
 
-              <div className="fin-card card-gradient-green glass-panel">
+              <div 
+                className={`fin-card card-gradient-green glass-panel ${activeChartMetric === 'liquidCash' ? 'active-metric-card' : ''}`}
+                onClick={() => handleClickCard('liquidCash')}
+                onDoubleClick={() => handleDoubleClickCard('liquidCash')}
+                style={{ cursor: 'pointer', transform: activeChartMetric === 'liquidCash' ? 'scale(1.02)' : 'none', border: activeChartMetric === 'liquidCash' ? '2px solid #10b981' : '1px solid rgba(255,255,255,0.1)' }}
+              >
                 <span className="card-label">流動現金 (Liquid Cash)</span>
                 <h2 className="card-value">${liquidCash.toLocaleString('zh-TW')}</h2>
                 <div className="card-footer">
@@ -464,7 +496,12 @@ function App() {
                 </div>
               </div>
 
-              <div className="fin-card card-gradient-gold glass-panel">
+              <div 
+                className={`fin-card card-gradient-gold glass-panel ${activeChartMetric === 'investments' ? 'active-metric-card' : ''}`}
+                onClick={() => handleClickCard('investments')}
+                onDoubleClick={() => handleDoubleClickCard('investments')}
+                style={{ cursor: 'pointer', transform: activeChartMetric === 'investments' ? 'scale(1.02)' : 'none', border: activeChartMetric === 'investments' ? '2px solid #f59e0b' : '1px solid rgba(255,255,255,0.1)' }}
+              >
                 <span className="card-label">投資部位 (Investments)</span>
                 <h2 className="card-value">${(stockAssets + currencyAssets).toLocaleString('zh-TW')}</h2>
                 <div className="card-footer">
@@ -496,9 +533,15 @@ function App() {
                       formatter={(value: number) => [`$${value.toLocaleString()}`, '']}
                     />
                     <Legend />
-                    <Line type="monotone" dataKey="netWorth" name="淨資產" stroke="#3b82f6" strokeWidth={3} activeDot={{ r: 8 }} />
-                    <Line type="monotone" dataKey="liquidCash" name="流動現金" stroke="#10b981" strokeWidth={3} />
-                    <Line type="monotone" dataKey="investments" name="投資部位" stroke="#f59e0b" strokeWidth={3} />
+                    {(exclusiveChartMetric === 'all' || exclusiveChartMetric === 'netWorth') && (
+                      <Line type="monotone" dataKey="netWorth" name="淨資產" stroke="#3b82f6" strokeWidth={activeChartMetric === 'all' || activeChartMetric === 'netWorth' ? 3 : 1} strokeOpacity={activeChartMetric === 'all' || activeChartMetric === 'netWorth' ? 1 : 0.2} activeDot={{ r: 8 }} />
+                    )}
+                    {(exclusiveChartMetric === 'all' || exclusiveChartMetric === 'liquidCash') && (
+                      <Line type="monotone" dataKey="liquidCash" name="流動現金" stroke="#10b981" strokeWidth={activeChartMetric === 'all' || activeChartMetric === 'liquidCash' ? 3 : 1} strokeOpacity={activeChartMetric === 'all' || activeChartMetric === 'liquidCash' ? 1 : 0.2} activeDot={{ r: 8 }} />
+                    )}
+                    {(exclusiveChartMetric === 'all' || exclusiveChartMetric === 'investments') && (
+                      <Line type="monotone" dataKey="investments" name="投資部位" stroke="#f59e0b" strokeWidth={activeChartMetric === 'all' || activeChartMetric === 'investments' ? 3 : 1} strokeOpacity={activeChartMetric === 'all' || activeChartMetric === 'investments' ? 1 : 0.2} activeDot={{ r: 8 }} />
+                    )}
                   </LineChart>
                 </ResponsiveContainer>
               ) : (
@@ -583,23 +626,55 @@ function App() {
             </div>
 
             {/* Historical advice log */}
-            {reports.length > 1 && (
-              <div className="glass-panel" style={{ marginTop: '2rem' }}>
-                <h3>📜 歷史理財顧問建議紀錄</h3>
-                <div className="history-reports-list">
-                  {reports.slice(1).map(rep => (
-                    <details key={rep.id} className="history-report-details">
-                      <summary>理財診斷報告 - {formatDateTime(rep.created_at)}</summary>
-                      <div className="markdown-body select-text" style={{ padding: '1rem', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', marginTop: '0.5rem' }}>
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {rep.analysis}
-                        </ReactMarkdown>
-                      </div>
-                    </details>
-                  ))}
+            {reports.length > 1 && (() => {
+              const now = new Date();
+              const historicalReports = reports.slice(1);
+              const filteredHistoryReports = historicalReports.filter(rep => {
+                if (reportTab === 'history') return true;
+                const dString = rep.created_at;
+                const cleanString = dString.endsWith('Z') ? dString : dString + 'Z';
+                const repDate = new Date(cleanString);
+                
+                if (reportTab === 'today') {
+                  return repDate.getDate() === now.getDate() && 
+                         repDate.getMonth() === now.getMonth() && 
+                         repDate.getFullYear() === now.getFullYear();
+                }
+                if (reportTab === 'week') {
+                  const diffTime = now.getTime() - repDate.getTime();
+                  const diffDays = diffTime / (1000 * 60 * 60 * 24);
+                  return diffDays <= 7;
+                }
+                return true;
+              });
+
+              return (
+                <div className="glass-panel" style={{ marginTop: '2rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.5rem', marginBottom: '1rem' }}>
+                    <h3 style={{ margin: 0 }}>📜 歷史理財顧問建議紀錄</h3>
+                    <div className="report-tabs" style={{ display: 'flex', gap: '1rem' }}>
+                      <button className={`tab-btn ${reportTab === 'today' ? 'active' : ''}`} onClick={() => setReportTab('today')} style={{ background: 'none', border: 'none', color: reportTab === 'today' ? '#3b82f6' : 'white', cursor: 'pointer', fontWeight: reportTab === 'today' ? 'bold' : 'normal' }}>本日</button>
+                      <button className={`tab-btn ${reportTab === 'week' ? 'active' : ''}`} onClick={() => setReportTab('week')} style={{ background: 'none', border: 'none', color: reportTab === 'week' ? '#3b82f6' : 'white', cursor: 'pointer', fontWeight: reportTab === 'week' ? 'bold' : 'normal' }}>本週</button>
+                      <button className={`tab-btn ${reportTab === 'history' ? 'active' : ''}`} onClick={() => setReportTab('history')} style={{ background: 'none', border: 'none', color: reportTab === 'history' ? '#3b82f6' : 'white', cursor: 'pointer', fontWeight: reportTab === 'history' ? 'bold' : 'normal' }}>歷史紀錄</button>
+                    </div>
+                  </div>
+                  <div className="history-reports-list">
+                    {filteredHistoryReports.length > 0 ? filteredHistoryReports.map(rep => (
+                      <details key={rep.id} className="history-report-details">
+                        <summary>理財診斷報告 - {formatDateTime(rep.created_at)}</summary>
+                        <div className="markdown-body select-text" style={{ padding: '1rem', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', marginTop: '0.5rem' }}>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {rep.analysis}
+                          </ReactMarkdown>
+                        </div>
+                      </details>
+                    )) : (
+                      <p style={{ opacity: 0.6, textAlign: 'center', padding: '1rem 0' }}>此區間無建議紀錄。</p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         )}
 

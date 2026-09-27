@@ -1,4 +1,5 @@
 require('dotenv').config();
+process.env.TZ = process.env.TZ || 'America/Phoenix';
 const { Pool } = require('pg');
 
 const pool = new Pool({

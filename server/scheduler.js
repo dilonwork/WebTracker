@@ -88,6 +88,8 @@ function schedulePage(pageId, url, prompt, cronExpression) {
   console.log(`[SCHEDULER] Mounted cron job for ID: ${pageId} | EXPR: ${cronExpression}`);
   activeTasks[pageId] = cron.schedule(cronExpression, () => {
     performCrawl(pageId, url, prompt);
+  }, {
+    timezone: process.env.TZ || 'America/Phoenix'
   });
 }
 

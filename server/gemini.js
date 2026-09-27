@@ -1,6 +1,6 @@
 const axios = require('axios');
 
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://your-ollama-host:11434';
 const MODEL_NAME = process.env.OLLAMA_MODEL || 'batiai/gemma4-e4b:q4';
 
 // Helper to delay execution
@@ -68,7 +68,10 @@ async function analyzeFinancialPortfolio(portfolioData, marketContext) {
 
   // Format latest web tracking crawler insights
   const marketText = marketContext.length > 0
-    ? marketContext.map(m => `* 網頁追蹤項目 [${m.name}] (${m.url}):\n  爬取時間: ${m.crawled_at}\n  趨勢分析: ${m.llm_response}`).join('\n\n')
+    ? marketContext.map(m => {
+        const localTime = new Date(m.crawled_at).toLocaleString('zh-TW', { timeZone: process.env.TZ || 'America/Phoenix' });
+        return `* 網頁追蹤項目 [${m.name}] (${m.url}):\n  爬取時間: ${localTime}\n  趨勢分析: ${m.llm_response}`;
+      }).join('\n\n')
     : "無（尚未爬取股票或匯率相關資訊）";
 
   const systemPrompt = `你是一位專業的個人 AI 理財規劃顧問與資產配置專家。
