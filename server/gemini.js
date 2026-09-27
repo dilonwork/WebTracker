@@ -1,6 +1,7 @@
 const axios = require('axios');
 
-const MODEL_NAME = 'gemini-3.1-flash-lite';
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
+const MODEL_NAME = process.env.OLLAMA_MODEL || 'batiai/gemma4-e4b:q4';
 
 // Helper to delay execution
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -13,11 +14,11 @@ async function postWithRetry(url, data, config = {}, retries = 3, delay = 1500) 
       return response;
     } catch (error) {
       const status = error.response ? error.response.status : null;
-      // Retry on 429 (Too Many Requests) or 5xx server errors (Service Unavailable, etc.)
+      // Retry on 429 (Too Many Requests) or 5xx server errors
       const isTransient = !status || status === 429 || (status >= 500 && status <= 599);
 
       if (isTransient && i < retries - 1) {
-        console.warn(`[Gemini API] Request failed with status ${status || 'network error'}. Retrying in ${delay}ms... (Attempt ${i + 1}/${retries})`);
+        console.warn(`[Ollama API] Request failed with status ${status || 'network error'}. Retrying in ${delay}ms... (Attempt ${i + 1}/${retries})`);
         await sleep(delay);
         delay *= 2; // Exponential backoff
       } else {
@@ -28,52 +29,33 @@ async function postWithRetry(url, data, config = {}, retries = 3, delay = 1500) 
 }
 
 async function analyzeContentWithGemini(contextHtml, promptText) {
-  const apiKey = process.env.GEMINI_API_KEY;
-
-  if (!apiKey) {
-    console.error("GEMINI_API_KEY is not set in .env!");
-    return "Error: GEMINI_API_KEY is missing.";
-  }
-
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
   const contentToAnalyze = contextHtml.length > 25000 ? contextHtml.substring(0, 25000) + '... (truncated)' : contextHtml;
 
   try {
+    const prompt = `You are an AI Web Scraper Analyzer. You will be provided with some webpage text, and a prompt of what the user wants to extract or analyze from it. \n\nUser's Prompt: ${promptText}\n\nWebpage Text:\n${contentToAnalyze}`;
+
     const payload = {
-      contents: [
-        {
-          parts: [
-            { text: `You are an AI Web Scraper Analyzer. You will be provided with some webpage text, and a prompt of what the user wants to extract or analyze from it. \n\nUser's Prompt: ${promptText}\n\nWebpage Text:\n${contentToAnalyze}` }
-          ]
-        }
-      ]
+      model: MODEL_NAME,
+      prompt: prompt,
+      stream: false
     };
 
-    const response = await postWithRetry(endpoint, payload, {
+    const response = await postWithRetry(`${OLLAMA_URL}/api/generate`, payload, {
       headers: { 'Content-Type': 'application/json' }
     });
 
-    if (response.data && response.data.candidates && response.data.candidates.length > 0) {
-      return response.data.candidates[0].content.parts[0].text;
+    if (response.data && response.data.response) {
+      return response.data.response;
     } else {
-      return "No content returned from Gemini.";
+      return "No content returned from Ollama.";
     }
   } catch (error) {
-    console.error("Gemini API Error:", (error.response && error.response.data) || error.message);
+    console.error("Ollama API Error:", (error.response && error.response.data) || error.message);
     return `Error: ${error.message}`;
   }
 }
 
 async function analyzeFinancialPortfolio(portfolioData, marketContext) {
-  const apiKey = process.env.GEMINI_API_KEY;
-
-  if (!apiKey) {
-    console.error("GEMINI_API_KEY is not set in .env!");
-    return "Error: GEMINI_API_KEY is missing.";
-  }
-
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
-
   // Format portfolio accounts
   const accountsText = portfolioData.accounts.map(acc => {
     return `- ${acc.name} (${acc.institution}): 類別=${acc.type}, 子類別=${acc.subtype}, 餘額/水位=${acc.balance} ${acc.currency}, 每月還款=${acc.monthly_payment}, 利率=${acc.interest_rate}%`;
@@ -126,26 +108,22 @@ ${marketText}
 
   try {
     const payload = {
-      contents: [
-        {
-          parts: [
-            { text: systemPrompt }
-          ]
-        }
-      ]
+      model: MODEL_NAME,
+      prompt: systemPrompt,
+      stream: false
     };
 
-    const response = await postWithRetry(endpoint, payload, {
+    const response = await postWithRetry(`${OLLAMA_URL}/api/generate`, payload, {
       headers: { 'Content-Type': 'application/json' }
     });
 
-    if (response.data && response.data.candidates && response.data.candidates.length > 0) {
-      return response.data.candidates[0].content.parts[0].text;
+    if (response.data && response.data.response) {
+      return response.data.response;
     } else {
       return "無法生成理財分析報告。";
     }
   } catch (error) {
-    console.error("Gemini Advisor API Error:", (error.response && error.response.data) || error.message);
+    console.error("Ollama Advisor API Error:", (error.response && error.response.data) || error.message);
     return `理財診斷執行失敗: ${error.message}`;
   }
 }
