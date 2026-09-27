@@ -23,6 +23,28 @@ interface CrawlResult {
   prompt: string;
 }
 
+/** 相對時間：5 分鐘前、2 小時前 ... */
+const timeAgo = (iso: string): string => {
+  const diff = Date.now() - new Date(iso + 'Z').getTime();
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return '剛剛';
+  if (min < 60) return `${min} 分鐘前`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} 小時前`;
+  const day = Math.floor(hr / 24);
+  if (day === 1) return '昨天';
+  if (day < 7) return `${day} 天前`;
+  return new Date(iso + 'Z').toLocaleDateString();
+};
+
+/** 去掉 markdown 語法，取純文字摘要 */
+const stripMarkdown = (md: string): string =>
+  md
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/[#>*`_~|\-[\]()!]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
 function App() {
   const [pages, setPages] = useState<TrackedPage[]>([]);
   const [results, setResults] = useState<CrawlResult[]>([]);
@@ -41,6 +63,14 @@ function App() {
   const groups = Array.from(new Set(results.map(r => r.name || r.url)));
   const currentTab = activeTab && groups.includes(activeTab) ? activeTab : (groups.length > 0 ? groups[0] : '');
   const filteredResults = results.filter(r => (r.name || r.url) === currentTab);
+
+  // results 已由 API 依 crawled_at DESC 排序
+  const stats = {
+    totalTasks: pages.length,
+    scheduledTasks: pages.filter(p => p.cron_expression && p.cron_expression.trim()).length,
+    totalResults: results.length,
+    lastCrawl: results.length > 0 ? results[0].crawled_at : null as string | null,
+  };
 
   const fetchPages = () => fetch('/api/pages').then(res => res.json()).then(setPages).catch(console.error);
   const fetchResults = () => fetch('/api/results').then(res => res.json()).then(setResults).catch(console.error);
@@ -132,9 +162,34 @@ function App() {
           </button>
         </div>
 
+        {/* Stats Overview */}
+        <div className="stats-grid">
+          <div className="stat-card glass-panel">
+            <div className="stat-value">{stats.totalTasks}</div>
+            <div className="stat-label">追蹤任務</div>
+          </div>
+          <div className="stat-card glass-panel">
+            <div className="stat-value">{stats.scheduledTasks}</div>
+            <div className="stat-label">定時排程</div>
+          </div>
+          <div className="stat-card glass-panel">
+            <div className="stat-value">{stats.totalResults}</div>
+            <div className="stat-label">分析結果</div>
+          </div>
+          <div className="stat-card glass-panel">
+            <div className="stat-value stat-value-sm">{stats.lastCrawl ? timeAgo(stats.lastCrawl) : '—'}</div>
+            <div className="stat-label">上次爬取</div>
+          </div>
+        </div>
+
         {/* Analysis Results Table */}
         <div className="results-panel glass-panel">
-          <h3> AI Analysis Result</h3>
+          <div className="results-header">
+            <h3>AI Analysis Result</h3>
+            <button className="btn btn-secondary btn-sm" onClick={fetchResults} title="重新整理">
+              ↻ Refresh
+            </button>
+          </div>
           {results.length === 0 ? (
             <p className="no-data">No results yet. Start tracking to see LLM output.</p>
           ) : (
@@ -163,11 +218,15 @@ function App() {
                   </thead>
                   <tbody>
                     {filteredResults.map(r => (
-                      <tr key={r.id}>
-                        <td className="time-col">{new Date(r.crawled_at + "Z").toLocaleString()}</td>
+                      <tr key={r.id} className="result-row">
+                        <td className="time-col">
+                          <span className="rel-time">{timeAgo(r.crawled_at)}</span>
+                          <span className="full-time">{new Date(r.crawled_at + "Z").toLocaleString()}</span>
+                        </td>
                         <td className="url-col">{r.name ? `${r.name} (${r.url})` : r.url}</td>
-                        <td>{r.html_length}</td>
+                        <td className="len-col">{r.html_length}</td>
                         <td className="response-col">
+                          <div className="result-excerpt">{stripMarkdown(r.llm_response).slice(0, 160)}</div>
                           <button className="btn btn-primary btn-sm" onClick={() => setSelectedResult(r)}>
                             View Result
                           </button>

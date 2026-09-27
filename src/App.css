@@ -403,3 +403,253 @@
   border: 1px solid var(--border-glass);
   padding: 0.5rem;
 }
+
+/* ============ Stats Overview ============ */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+  margin-bottom: 2rem;
+  position: relative;
+  z-index: 1;
+  text-align: left;
+}
+
+.stat-card {
+  padding: 1rem 1.25rem;
+  border-radius: 12px;
+}
+
+.stat-value {
+  font-size: 1.8rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.stat-value-sm {
+  font-size: 1.15rem;
+  padding-top: 0.35rem;
+}
+
+.stat-label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-top: 0.25rem;
+}
+
+/* ============ Results header ============ */
+.results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.results-header h3 {
+  margin: 0 !important;
+}
+
+/* Excerpt preview (mobile cards only) */
+.result-excerpt {
+  display: none;
+}
+
+.rel-time {
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.full-time {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+/* ============ Mobile (<=768px) ============ */
+@media (max-width: 768px) {
+  .app-container {
+    padding: 1rem;
+    padding-bottom: calc(2rem + env(safe-area-inset-bottom));
+    align-items: flex-start;
+  }
+
+  .dashboard-hero {
+    padding: 1.5rem 1.1rem;
+  }
+
+  .header-title {
+    font-size: 1.9rem;
+  }
+
+  .header-subtitle {
+    font-size: 0.95rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .header-actions .btn {
+    width: 100%;
+  }
+
+  /* Stats: 2x2 on mobile */
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.6rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .stat-card {
+    padding: 0.85rem 1rem;
+  }
+
+  .stat-value {
+    font-size: 1.5rem;
+  }
+
+  /* Table -> cards */
+  .results-table thead {
+    display: none;
+  }
+
+  .results-table,
+  .results-table tbody {
+    display: block;
+  }
+
+  .results-table tr {
+    display: block;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-glass);
+    border-radius: 12px;
+    margin-bottom: 0.75rem;
+    padding: 0.9rem 1rem;
+  }
+
+  .results-table td {
+    display: block;
+    border: none;
+    padding: 0.15rem 0;
+    max-width: none;
+  }
+
+  .url-col {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    word-break: break-all;
+  }
+
+  .time-col {
+    font-size: 0.8rem;
+  }
+
+  .full-time {
+    display: none;
+  }
+
+  .len-col {
+    display: none;
+  }
+
+  .result-excerpt {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    color: var(--text-secondary);
+    margin: 0.4rem 0 0.75rem;
+  }
+
+  .response-col .btn {
+    width: 100%;
+    padding: 0.75rem;
+  }
+
+  /* Tabs: snap scrolling */
+  .tabs-container {
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tabs-container .btn {
+    scroll-snap-align: start;
+  }
+
+  /* Modal -> bottom sheet */
+  .modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal-content {
+    width: 100%;
+    max-width: 100%;
+    max-height: 92vh;
+    border-radius: 20px 20px 0 0;
+    padding: 1.5rem 1.25rem calc(1.5rem + env(safe-area-inset-bottom));
+    animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* Config form stacks */
+  .input-group {
+    flex-direction: column;
+    gap: 0.6rem;
+    margin-bottom: 0.6rem;
+  }
+
+  .detailed-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+
+  .item-actions {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .item-actions .btn-sm {
+    flex: 1;
+  }
+
+  .meta-bar {
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: flex-start;
+  }
+
+  .badge {
+    word-break: break-all;
+  }
+
+  /* Touch-friendly targets */
+  .btn {
+    min-height: 44px;
+  }
+}
+
+/* Small phones */
+@media (max-width: 400px) {
+  .header-title {
+    font-size: 1.6rem;
+  }
+
+  .stats-grid {
+    gap: 0.5rem;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(40px);
+    opacity: 0.5;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
