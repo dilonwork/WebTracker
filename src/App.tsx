@@ -263,6 +263,35 @@ function App() {
   };
 
   // Balance Batch Updates
+  const [expandedAccId, setExpandedAccId] = useState<number | null>(null);
+
+  const SUBTYPE_LABEL: Record<string, string> = {
+    cash: '現金', deposit: '定存', stock: '股票', currency: '外幣', loan: '信貸', mortgage: '房貸',
+  };
+
+  const dirtyCount = accounts.filter(a => {
+    const cur = editBalances[a.id] !== undefined ? editBalances[a.id] : a.balance;
+    return Number(cur) !== Number(a.balance);
+  }).length;
+
+  const handleSaveOneBalance = async (id: number) => {
+    const balance = Number(editBalances[id] !== undefined ? editBalances[id] : accounts.find(a => a.id === id)?.balance);
+    try {
+      const res = await fetch('/api/financials/accounts/batch/balances', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ balances: [{ id, balance }] })
+      });
+      if (res.ok) {
+        fetchAccounts();
+      } else {
+        alert('更新失敗');
+      }
+    } catch (err: any) {
+      alert('更新請求失敗: ' + err.message);
+    }
+  };
+
   const handleSaveBalances = async () => {
     const balancePayload = Object.entries(editBalances).map(([id, balance]) => ({
       id: parseInt(id, 10),
@@ -658,135 +687,103 @@ function App() {
 
         {/* TAB 2: MAINTENANCE */}
         {activeTab === 'maintenance' && (
-          <div className="tab-pane animate-fade-in">
-            <header className="content-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h1>各部位帳戶與水位維護</h1>
-                <p>每週更新各銀行、證券與貸款部位的最新水位，確保財務數據的準確性。</p>
-              </div>
-              <button className="btn btn-secondary" onClick={() => handleOpenAccountModal()}>
-                ➕ 新增帳戶部位
-              </button>
-            </header>
+          <div className="tab-pane animate-fade-in v1-dash">
+            <div className="v1-maint-head">
+              <h1>帳戶水位維護</h1>
+              <p>點選帳戶展開，快速調整水位餘額。</p>
+            </div>
 
-            <div className="glass-panel">
-              <h3>💵 每週水位快速調整 (維護調整各部位水位)</h3>
-              
-              {/* Desktop Account Table */}
-              <div className="accounts-maintenance-table-wrapper desktop-only-view">
-                <table className="maintenance-table">
-                  <thead>
-                    <tr>
-                      <th>部位名稱</th>
-                      <th>機構</th>
-                      <th>類型 / 子類別</th>
-                      <th>利率</th>
-                      <th>每月償付</th>
-                      <th style={{ width: '220px' }}>目前水位餘額 (TWD)</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {accounts.map(acc => (
-                      <tr key={acc.id} className={acc.type === 'liability' ? 'row-liability' : 'row-asset'}>
-                        <td>
-                          <strong>{acc.name}</strong>
-                          {acc.currency !== 'TWD' && <span className="currency-badge">{acc.currency}</span>}
-                        </td>
-                        <td>{acc.institution}</td>
-                        <td>
-                          <span className={`badge-type ${acc.type}`}>
-                            {acc.type === 'asset' ? '資產' : '負債'}
-                          </span>
-                          <span className="badge-subtype">
-                            {acc.subtype}
-                          </span>
-                        </td>
-                        <td>{acc.interest_rate > 0 ? `${acc.interest_rate}%` : '-'}</td>
-                        <td>{acc.monthly_payment > 0 ? `$${acc.monthly_payment.toLocaleString()}` : '-'}</td>
-                        <td>
-                          <div className="balance-input-wrapper">
-                            <span>$</span>
-                            <input 
-                              type="number"
-                              className="balance-input-field"
-                              value={editBalances[acc.id] !== undefined ? editBalances[acc.id] : acc.balance}
-                              onChange={(e) => {
-                                setEditBalances({
-                                  ...editBalances,
-                                  [acc.id]: Number(e.target.value)
-                                });
-                              }}
-                            />
-                          </div>
-                        </td>
-                        <td>
-                          <div style={{ display: 'flex', gap: '0.5rem' }}>
-                            <button className="btn-sm btn-secondary" onClick={() => handleOpenAccountModal(acc)}>
-                              ✏️
-                            </button>
-                            <button className="btn-sm btn-danger" onClick={() => handleDeleteAccount(acc.id)}>
-                              ✕
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {/* 總覽小卡 */}
+            <div className="v1-stats">
+              <div className="v1-stat glass-panel">
+                <span className="v1-label">總資產</span>
+                <div className="v1-stat-v num" style={{ color: '#34d399' }}>${totalAssets.toLocaleString('zh-TW')}</div>
               </div>
-
-              {/* Mobile Account Cards */}
-              <div className="mobile-only-view" style={{ marginTop: '1rem' }}>
-                {accounts.map(acc => (
-                  <div key={acc.id} className={`mobile-acc-card ${acc.type}`}>
-                    <div className="mobile-acc-card-header">
-                      <div>
-                        <span className="mobile-acc-name">{acc.name}</span>
-                        {acc.currency !== 'TWD' && <span className="currency-badge">{acc.currency}</span>}
-                      </div>
-                      <div className="mobile-acc-actions">
-                        <button className="btn-sm btn-secondary" onClick={() => handleOpenAccountModal(acc)}>✏️</button>
-                        <button className="btn-sm btn-danger" onClick={() => handleDeleteAccount(acc.id)}>✕</button>
-                      </div>
-                    </div>
-                    <div className="mobile-acc-card-body">
-                      <div className="mobile-acc-meta">
-                        <span>機構: {acc.institution}</span>
-                        <span>類別: {acc.type === 'asset' ? '資產' : '負債'} ({acc.subtype})</span>
-                        {acc.interest_rate > 0 && <span>年利: {acc.interest_rate}%</span>}
-                        {acc.monthly_payment > 0 && <span>月償: ${acc.monthly_payment.toLocaleString()}</span>}
-                      </div>
-                      <div className="mobile-acc-balance-row">
-                        <label>餘額水位:</label>
-                        <div className="balance-input-wrapper">
-                          <span>$</span>
-                          <input 
-                            type="number"
-                            className="balance-input-field"
-                            value={editBalances[acc.id] !== undefined ? editBalances[acc.id] : acc.balance}
-                            onChange={(e) => {
-                              setEditBalances({
-                                ...editBalances,
-                                  [acc.id]: Number(e.target.value)
-                              });
-                            }}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+              <div className="v1-stat glass-panel">
+                <span className="v1-label">總負債</span>
+                <div className="v1-stat-v num" style={{ color: '#f87171' }}>${totalLiabilities.toLocaleString('zh-TW')}</div>
               </div>
-
-              <div style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'flex-end' }}>
-                <button className="btn btn-primary" onClick={handleSaveBalances} style={{ padding: '0.75rem 2rem' }}>
-                  💾 儲存部位水位更新
-                </button>
+              <div className="v1-stat glass-panel">
+                <span className="v1-label">淨資產</span>
+                <div className="v1-stat-v num">${netWorth.toLocaleString('zh-TW')}</div>
               </div>
             </div>
+
+            <button className="btn btn-secondary v1-add-btn" onClick={() => handleOpenAccountModal()}>
+              ➕ 新增帳戶部位
+            </button>
+
+            {/* 資產 / 負債分組 */}
+            {([['asset', '💰 資產'], ['liability', '💳 負債']] as const).map(([type, title]) => {
+              const list = accounts.filter(a => a.type === type);
+              if (list.length === 0) return null;
+              return (
+                <div className="v1-sec" key={type}>
+                  <div className="v1-sec-h"><h3>{title}（{list.length}）</h3></div>
+                  {list.map(acc => {
+                    const st = ACCT_STYLE[acc.subtype] || ACCT_STYLE.cash;
+                    const cur = editBalances[acc.id] !== undefined ? editBalances[acc.id] : acc.balance;
+                    const dirty = Number(cur) !== Number(acc.balance);
+                    const expanded = expandedAccId === acc.id;
+                    return (
+                      <div key={acc.id} className={`v1-mrow glass-panel${expanded ? ' open' : ''}${dirty ? ' dirty' : ''}`}>
+                        <div className="v1-mrow-head" onClick={() => setExpandedAccId(expanded ? null : acc.id)}>
+                          <div className="v1-ic" style={{ background: st.bg }}>{st.icon}</div>
+                          <div className="v1-mrow-info">
+                            <div className="v1-row-n">{acc.name}{dirty && <span className="v1-dirty-dot" />}</div>
+                            <div className="v1-row-d">{acc.institution} · {SUBTYPE_LABEL[acc.subtype] || acc.subtype}{acc.currency !== 'TWD' ? ` · ${acc.currency}` : ''}</div>
+                          </div>
+                          <div className={`v1-row-b num${dirty ? ' dirty-val' : ''}`}>${Number(cur).toLocaleString('zh-TW')}</div>
+                          <div className={`v1-chev${expanded ? ' rot' : ''}`}>›</div>
+                        </div>
+                        {expanded && (
+                          <div className="v1-mrow-body">
+                            <label className="v1-label">餘額水位（TWD）</label>
+                            <div className="v1-big-input">
+                              <span>$</span>
+                              <input
+                                type="number"
+                                inputMode="numeric"
+                                value={cur}
+                                onChange={(e) => setEditBalances({ ...editBalances, [acc.id]: Number(e.target.value) })}
+                              />
+                            </div>
+                            <div className="v1-quick">
+                              {[-100000, -10000, 10000, 100000].map(d => (
+                                <button
+                                  key={d}
+                                  onClick={() => setEditBalances({ ...editBalances, [acc.id]: Number(cur) + d })}
+                                >
+                                  {d > 0 ? `+${d / 10000}萬` : `${d / 10000}萬`}
+                                </button>
+                              ))}
+                            </div>
+                            {(acc.interest_rate > 0 || acc.monthly_payment > 0) && (
+                              <div className="v1-mrow-meta">
+                                {acc.interest_rate > 0 && <span>年利率 {acc.interest_rate}%</span>}
+                                {acc.monthly_payment > 0 && <span>月償 ${Number(acc.monthly_payment).toLocaleString('zh-TW')}</span>}
+                              </div>
+                            )}
+                            <div className="v1-mrow-actions">
+                              <button className="btn btn-primary" onClick={() => handleSaveOneBalance(acc.id)} disabled={!dirty}>
+                                💾 儲存此筆
+                              </button>
+                              <button className="btn btn-secondary" onClick={() => handleOpenAccountModal(acc)}>✏️</button>
+                              <button className="btn btn-danger" onClick={() => { if (window.confirm(`確定刪除「${acc.name}」嗎？`)) handleDeleteAccount(acc.id); }}>刪除</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+            {accounts.length === 0 && <p className="no-data-hint">尚未建立任何帳戶，點上方新增第一個部位。</p>}
+
           </div>
         )}
+
 
         {/* TAB 3: CASH DEMANDS */}
         {activeTab === 'demands' && (
@@ -1067,6 +1064,14 @@ function App() {
         )}
 
       </main>
+
+      {/* sticky 儲存列：放在 tab-pane 外，避免被 .animate-fade-in 的 transform 困住 fixed 定位 */}
+      {activeTab === 'maintenance' && dirtyCount > 0 && (
+        <div className="v1-savebar glass-panel">
+          <span><span className="v1-dirty-dot" /> {dirtyCount} 項水位未儲存</span>
+          <button className="btn btn-primary" onClick={handleSaveBalances}>💾 全部儲存</button>
+        </div>
+      )}
 
       {/* MODAL: ACCOUNT FORM */}
       {isAccountModalOpen && (
