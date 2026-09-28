@@ -3,6 +3,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const cron = require('node-cron');
 const { analyzeContentWithGemini } = require('./gemini');
+const { updateStockPrices } = require('./stock');
 
 const activeTasks = {};
 async function scrapeUrl(url) {
@@ -41,16 +42,21 @@ async function performCrawl(pageId, url, prompt) {
     }
     
     // Save to results
-    db.run(
-      `INSERT INTO results (page_id, html_length, llm_response) VALUES (?, ?, ?)`,
-      [pageId, htmlLength, llmResponse],
-      (err) => {
-        if (err) console.error("Error saving result to DB:", err);
-      }
-    );
+    try {
+      await db.query(
+        `INSERT INTO results (page_id, html_length, llm_response) VALUES ($1, $2, $3)`,
+        [pageId, htmlLength, llmResponse]
+      );
+    } catch (dbErr) {
+      console.error("Error saving result to DB:", dbErr);
+    }
 
     // Update last_crawled
-    db.run(`UPDATE pages SET last_crawled = CURRENT_TIMESTAMP WHERE id = ?`, [pageId]);
+    try {
+      await db.query(`UPDATE pages SET last_crawled = CURRENT_TIMESTAMP WHERE id = $1`, [pageId]);
+    } catch (dbErr) {
+      console.error("Error updating last_crawled in DB:", dbErr);
+    }
     console.log(`[CRAWL SUCCESS] ID: ${pageId} | Succeeded`);
     
     return { success: true, llmResponse };
@@ -83,18 +89,37 @@ function schedulePage(pageId, url, prompt, cronExpression) {
   console.log(`[SCHEDULER] Mounted cron job for ID: ${pageId} | EXPR: ${cronExpression}`);
   activeTasks[pageId] = cron.schedule(cronExpression, () => {
     performCrawl(pageId, url, prompt);
+  }, {
+    timezone: process.env.TZ || 'America/Phoenix'
   });
 }
 
 // Initialize all currently saved tasks on boot
-function startScheduler() {
-  db.all(`SELECT id, url, prompt, cron_expression FROM pages WHERE cron_expression IS NOT NULL`, (err, rows) => {
-    if (err) return console.error('Scheduler DB Error:', err.message);
-    
+async function startScheduler() {
+  try {
+    const { rows } = await db.query(
+      `SELECT id, url, prompt, cron_expression FROM pages WHERE cron_expression IS NOT NULL`
+    );
     rows.forEach(row => {
       schedulePage(row.id, row.url, row.prompt, row.cron_expression);
     });
-  });
+  } catch (err) {
+    console.error('Scheduler DB Error:', err.message);
+  }
 }
 
-module.exports = { startScheduler, performCrawl, schedulePage, unschedulePage };
+// Hourly stock price refresh from Yahoo Finance (at minute 0 of every hour)
+function startStockScheduler() {
+  cron.schedule('0 * * * *', async () => {
+    try {
+      await updateStockPrices();
+    } catch (err) {
+      console.error('[STOCK] Scheduled update error:', err.message);
+    }
+  }, {
+    timezone: process.env.TZ || 'America/Phoenix'
+  });
+  console.log('[SCHEDULER] Hourly Yahoo stock price refresh mounted (0 * * * *)');
+}
+
+module.exports = { startScheduler, startStockScheduler, performCrawl, schedulePage, unschedulePage };
