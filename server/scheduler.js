@@ -3,6 +3,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const cron = require('node-cron');
 const { analyzeContentWithGemini } = require('./gemini');
+const { updateStockPrices } = require('./stock');
 
 const activeTasks = {};
 async function scrapeUrl(url) {
@@ -107,4 +108,18 @@ async function startScheduler() {
   }
 }
 
-module.exports = { startScheduler, performCrawl, schedulePage, unschedulePage };
+// Hourly stock price refresh from Yahoo Finance (at minute 0 of every hour)
+function startStockScheduler() {
+  cron.schedule('0 * * * *', async () => {
+    try {
+      await updateStockPrices();
+    } catch (err) {
+      console.error('[STOCK] Scheduled update error:', err.message);
+    }
+  }, {
+    timezone: process.env.TZ || 'America/Phoenix'
+  });
+  console.log('[SCHEDULER] Hourly Yahoo stock price refresh mounted (0 * * * *)');
+}
+
+module.exports = { startScheduler, startStockScheduler, performCrawl, schedulePage, unschedulePage };

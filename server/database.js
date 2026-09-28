@@ -82,6 +82,10 @@ const initDb = async () => {
 
     console.log('PostgreSQL database tables initialized.');
 
+    // Stock auto-update columns (ticker + shares for Yahoo Finance hourly refresh)
+    await pool.query(`ALTER TABLE fin_accounts ADD COLUMN IF NOT EXISTS ticker TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE fin_accounts ADD COLUMN IF NOT EXISTS shares NUMERIC(15, 4) DEFAULT 0`);
+
     // Seed default accounts if empty
     const { rows } = await pool.query('SELECT COUNT(*) FROM fin_accounts');
     if (parseInt(rows[0].count, 10) === 0) {

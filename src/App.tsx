@@ -34,6 +34,8 @@ interface FinancialAccount {
   currency: string;
   monthly_payment: number;
   interest_rate: number;
+  ticker: string;
+  shares: number;
   updated_at: string;
 }
 
@@ -96,6 +98,8 @@ function App() {
   const [accCurrency, setAccCurrency] = useState('TWD');
   const [accMonthlyPayment, setAccMonthlyPayment] = useState('');
   const [accInterestRate, setAccInterestRate] = useState('');
+  const [accTicker, setAccTicker] = useState('');
+  const [accShares, setAccShares] = useState('');
 
   // Form States - Cash Demands
   const [demandDesc, setDemandDesc] = useState('');
@@ -274,6 +278,25 @@ function App() {
     return Number(cur) !== Number(a.balance);
   }).length;
 
+  const [isRefreshingStocks, setIsRefreshingStocks] = useState(false);
+  const handleRefreshStocks = async () => {
+    setIsRefreshingStocks(true);
+    try {
+      const res = await fetch('/api/financials/stocks/refresh', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`股價更新完成，共更新 ${data.updated} 個帳戶`);
+        fetchAccounts();
+      } else {
+        alert('更新失敗：' + (data.error || '未知錯誤'));
+      }
+    } catch (err: any) {
+      alert('更新請求失敗: ' + err.message);
+    } finally {
+      setIsRefreshingStocks(false);
+    }
+  };
+
   const handleSaveOneBalance = async (id: number) => {
     const balance = Number(editBalances[id] !== undefined ? editBalances[id] : accounts.find(a => a.id === id)?.balance);
     try {
@@ -326,6 +349,8 @@ function App() {
       setAccCurrency(acc.currency);
       setAccMonthlyPayment(acc.monthly_payment.toString());
       setAccInterestRate(acc.interest_rate.toString());
+      setAccTicker(acc.ticker || '');
+      setAccShares(acc.shares ? acc.shares.toString() : '');
     } else {
       setAccEditingId(null);
       setAccName('');
@@ -336,6 +361,8 @@ function App() {
       setAccCurrency('TWD');
       setAccMonthlyPayment('0');
       setAccInterestRate('0');
+      setAccTicker('');
+      setAccShares('');
     }
     setIsAccountModalOpen(true);
   };
@@ -349,7 +376,9 @@ function App() {
       balance: Number(accBalance) || 0,
       currency: accCurrency,
       monthly_payment: Number(accMonthlyPayment) || 0,
-      interest_rate: Number(accInterestRate) || 0
+      interest_rate: Number(accInterestRate) || 0,
+      ticker: accTicker.trim().toUpperCase(),
+      shares: Number(accShares) || 0
     };
 
     const method = accEditingId ? 'PUT' : 'POST';
@@ -709,9 +738,14 @@ function App() {
               </div>
             </div>
 
-            <button className="btn btn-secondary v1-add-btn" onClick={() => handleOpenAccountModal()}>
-              ➕ 新增帳戶部位
-            </button>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }}>
+              <button className="btn btn-secondary v1-add-btn" style={{ marginTop: 0, flex: 1 }} onClick={() => handleOpenAccountModal()}>
+                ➕ 新增帳戶部位
+              </button>
+              <button className="btn btn-secondary" style={{ borderRadius: '16px', padding: '0 18px', fontSize: '14px', whiteSpace: 'nowrap' }} onClick={handleRefreshStocks} disabled={isRefreshingStocks}>
+                {isRefreshingStocks ? '⏳ 更新中' : '🔄 股價更新'}
+              </button>
+            </div>
 
             {/* 資產 / 負債分組 */}
             {([['asset', '💰 資產'], ['liability', '💳 負債']] as const).map(([type, title]) => {
@@ -758,8 +792,11 @@ function App() {
                                 </button>
                               ))}
                             </div>
-                            {(acc.interest_rate > 0 || acc.monthly_payment > 0) && (
+                            {(acc.interest_rate > 0 || acc.monthly_payment > 0 || (acc.subtype === 'stock' && acc.ticker)) && (
                               <div className="v1-mrow-meta">
+                                {acc.subtype === 'stock' && acc.ticker && (
+                                  <span>📈 {acc.ticker}{Number(acc.shares) > 0 ? ` × ${Number(acc.shares).toLocaleString('zh-TW')} 股` : ''} · 每小時自動更新</span>
+                                )}
                                 {acc.interest_rate > 0 && <span>年利率 {acc.interest_rate}%</span>}
                                 {acc.monthly_payment > 0 && <span>月償 ${Number(acc.monthly_payment).toLocaleString('zh-TW')}</span>}
                               </div>
@@ -1180,6 +1217,34 @@ function App() {
                     onChange={e => setAccMonthlyPayment(e.target.value)} 
                   />
                 </div>
+              )}
+
+              {accSubtype === 'stock' && (
+                <>
+                  <div className="form-group">
+                    <label>股票代號 (Yahoo Ticker)</label>
+                    <input 
+                      type="text" 
+                      className="url-input" 
+                      value={accTicker} 
+                      onChange={e => setAccTicker(e.target.value.toUpperCase())} 
+                      placeholder="例如：2330.TW、AAPL"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>持有股數</label>
+                    <input 
+                      type="number" 
+                      className="url-input" 
+                      value={accShares} 
+                      onChange={e => setAccShares(e.target.value)} 
+                      placeholder="例如：1900"
+                    />
+                  </div>
+                  <p style={{ gridColumn: '1 / -1', fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>
+                    💡 填寫代號與股數後，系統每小時自動從 Yahoo Finance 更新股價並重算水位。
+                  </p>
+                </>
               )}
             </div>
 
