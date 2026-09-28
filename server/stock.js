@@ -92,8 +92,8 @@ async function updateStockPrices() {
       }
       balance = Math.round(balance * 100) / 100;
       await db.query(
-        'UPDATE fin_accounts SET balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-        [balance, acc.id]
+        'UPDATE fin_accounts SET balance = $1, last_price = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
+        [balance, quote.price, acc.id]
       );
       await db.query(
         'INSERT INTO fin_account_history (account_id, balance) VALUES ($1, $2)',

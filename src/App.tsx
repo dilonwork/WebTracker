@@ -36,6 +36,8 @@ interface FinancialAccount {
   interest_rate: number;
   ticker: string;
   shares: number;
+  cost_price: number;
+  last_price: number;
   updated_at: string;
 }
 
@@ -100,6 +102,7 @@ function App() {
   const [accInterestRate, setAccInterestRate] = useState('');
   const [accTicker, setAccTicker] = useState('');
   const [accShares, setAccShares] = useState('');
+  const [accCostPrice, setAccCostPrice] = useState('');
 
   // Form States - Cash Demands
   const [demandDesc, setDemandDesc] = useState('');
@@ -274,6 +277,8 @@ function App() {
   };
 
   const dirtyCount = accounts.filter(a => {
+    // 自動股票由每小時排程維護水位，不列入手動未儲存
+    if (a.subtype === 'stock' && a.ticker) return false;
     const cur = editBalances[a.id] !== undefined ? editBalances[a.id] : a.balance;
     return Number(cur) !== Number(a.balance);
   }).length;
@@ -316,10 +321,14 @@ function App() {
   };
 
   const handleSaveBalances = async () => {
-    const balancePayload = Object.entries(editBalances).map(([id, balance]) => ({
-      id: parseInt(id, 10),
-      balance: Number(balance)
-    }));
+    // 自動股票的水位由排程維護，批次儲存時排除
+    const autoIds = new Set(accounts.filter(a => a.subtype === 'stock' && a.ticker).map(a => a.id));
+    const balancePayload = Object.entries(editBalances)
+      .filter(([id]) => !autoIds.has(parseInt(id, 10)))
+      .map(([id, balance]) => ({
+        id: parseInt(id, 10),
+        balance: Number(balance)
+      }));
     try {
       const res = await fetch('/api/financials/accounts/batch/balances', {
         method: 'PUT',
@@ -351,6 +360,7 @@ function App() {
       setAccInterestRate(acc.interest_rate.toString());
       setAccTicker(acc.ticker || '');
       setAccShares(acc.shares ? acc.shares.toString() : '');
+      setAccCostPrice(acc.cost_price ? acc.cost_price.toString() : '');
     } else {
       setAccEditingId(null);
       setAccName('');
@@ -363,6 +373,7 @@ function App() {
       setAccInterestRate('0');
       setAccTicker('');
       setAccShares('');
+      setAccCostPrice('');
     }
     setIsAccountModalOpen(true);
   };
@@ -378,7 +389,8 @@ function App() {
       monthly_payment: Number(accMonthlyPayment) || 0,
       interest_rate: Number(accInterestRate) || 0,
       ticker: accTicker.trim().toUpperCase(),
-      shares: Number(accShares) || 0
+      shares: Number(accShares) || 0,
+      cost_price: Number(accCostPrice) || 0
     };
 
     const method = accEditingId ? 'PUT' : 'POST';
@@ -759,39 +771,78 @@ function App() {
                     const cur = editBalances[acc.id] !== undefined ? editBalances[acc.id] : acc.balance;
                     const dirty = Number(cur) !== Number(acc.balance);
                     const expanded = expandedAccId === acc.id;
+                    // 自動股票：成本手動設、現價每小時抓；損益 = 市值 - 成本總額
+                    const isAutoStock = acc.subtype === 'stock' && !!acc.ticker;
+                    const stockCost = Number(acc.cost_price || 0) * Number(acc.shares || 0);
+                    const stockPnl = Number(acc.balance) - stockCost;
+                    const stockPnlPct = stockCost > 0 ? (stockPnl / stockCost) * 100 : 0;
                     return (
                       <div key={acc.id} className={`v1-mrow glass-panel${expanded ? ' open' : ''}${dirty ? ' dirty' : ''}`}>
                         <div className="v1-mrow-head" onClick={() => setExpandedAccId(expanded ? null : acc.id)}>
                           <div className="v1-ic" style={{ background: st.bg }}>{st.icon}</div>
                           <div className="v1-mrow-info">
                             <div className="v1-row-n">{acc.name}{dirty && <span className="v1-dirty-dot" />}</div>
-                            <div className="v1-row-d">{acc.institution} · {SUBTYPE_LABEL[acc.subtype] || acc.subtype}{acc.currency !== 'TWD' ? ` · ${acc.currency}` : ''}</div>
+                            <div className="v1-row-d">{acc.institution} · {SUBTYPE_LABEL[acc.subtype] || acc.subtype}{acc.currency !== 'TWD' ? ` · ${acc.currency}` : ''}{isAutoStock && stockCost > 0 && (
+                              <span className={stockPnl >= 0 ? 'pnl-up' : 'pnl-down'}> · 損益 {stockPnl >= 0 ? '+' : ''}{stockPnlPct.toFixed(1)}%</span>
+                            )}</div>
                           </div>
                           <div className={`v1-row-b num${dirty ? ' dirty-val' : ''}`}>${Number(cur).toLocaleString('zh-TW')}</div>
                           <div className={`v1-chev${expanded ? ' rot' : ''}`}>›</div>
                         </div>
                         {expanded && (
                           <div className="v1-mrow-body">
-                            <label className="v1-label">餘額水位（TWD）</label>
-                            <div className="v1-big-input">
-                              <span>$</span>
-                              <input
-                                type="number"
-                                inputMode="numeric"
-                                value={cur}
-                                onChange={(e) => setEditBalances({ ...editBalances, [acc.id]: Number(e.target.value) })}
-                              />
-                            </div>
-                            <div className="v1-quick">
-                              {[-100000, -10000, 10000, 100000].map(d => (
-                                <button
-                                  key={d}
-                                  onClick={() => setEditBalances({ ...editBalances, [acc.id]: Number(cur) + d })}
-                                >
-                                  {d > 0 ? `+${d / 10000}萬` : `${d / 10000}萬`}
-                                </button>
-                              ))}
-                            </div>
+                            {isAutoStock ? (
+                              <>
+                                <div className="v1-stock-info">
+                                  <div className="v1-stock-row">
+                                    <span className="v1-label">現價（Yahoo）</span>
+                                    <span className="num">${Number(acc.last_price || 0).toLocaleString('zh-TW')}</span>
+                                  </div>
+                                  <div className="v1-stock-row">
+                                    <span className="v1-label">持有股數</span>
+                                    <span className="num">{Number(acc.shares || 0).toLocaleString('zh-TW')} 股</span>
+                                  </div>
+                                  <div className="v1-stock-row">
+                                    <span className="v1-label">每股成本</span>
+                                    <span className="num">${Number(acc.cost_price || 0).toLocaleString('zh-TW')}</span>
+                                  </div>
+                                  <div className="v1-stock-row">
+                                    <span className="v1-label">成本總額</span>
+                                    <span className="num">${Math.round(Number(acc.cost_price || 0) * Number(acc.shares || 0)).toLocaleString('zh-TW')}</span>
+                                  </div>
+                                  <div className="v1-stock-row total">
+                                    <span className="v1-label">損益</span>
+                                    <span className={`num ${stockPnl >= 0 ? 'pnl-up' : 'pnl-down'}`}>
+                                      {stockPnl >= 0 ? '+' : ''}${Math.round(stockPnl).toLocaleString('zh-TW')}（{stockPnlPct >= 0 ? '+' : ''}{stockPnlPct.toFixed(1)}%）
+                                    </span>
+                                  </div>
+                                </div>
+                                <p className="v1-auto-note">💡 市值每小時自動從 Yahoo 更新；成本請用 ✏️ 編輯。</p>
+                              </>
+                            ) : (
+                              <>
+                                <label className="v1-label">餘額水位（TWD）</label>
+                                <div className="v1-big-input">
+                                  <span>$</span>
+                                  <input
+                                    type="number"
+                                    inputMode="numeric"
+                                    value={cur}
+                                    onChange={(e) => setEditBalances({ ...editBalances, [acc.id]: Number(e.target.value) })}
+                                  />
+                                </div>
+                                <div className="v1-quick">
+                                  {[-100000, -10000, 10000, 100000].map(d => (
+                                    <button
+                                      key={d}
+                                      onClick={() => setEditBalances({ ...editBalances, [acc.id]: Number(cur) + d })}
+                                    >
+                                      {d > 0 ? `+${d / 10000}萬` : `${d / 10000}萬`}
+                                    </button>
+                                  ))}
+                                </div>
+                              </>
+                            )}
                             {(acc.interest_rate > 0 || acc.monthly_payment > 0 || (acc.subtype === 'stock' && acc.ticker)) && (
                               <div className="v1-mrow-meta">
                                 {acc.subtype === 'stock' && acc.ticker && (
@@ -802,9 +853,11 @@ function App() {
                               </div>
                             )}
                             <div className="v1-mrow-actions">
-                              <button className="btn btn-primary" onClick={() => handleSaveOneBalance(acc.id)} disabled={!dirty}>
-                                💾 儲存此筆
-                              </button>
+                              {!isAutoStock && (
+                                <button className="btn btn-primary" onClick={() => handleSaveOneBalance(acc.id)} disabled={!dirty}>
+                                  💾 儲存此筆
+                                </button>
+                              )}
                               <button className="btn btn-secondary" onClick={() => handleOpenAccountModal(acc)}>✏️</button>
                               <button className="btn btn-danger" onClick={() => { if (window.confirm(`確定刪除「${acc.name}」嗎？`)) handleDeleteAccount(acc.id); }}>刪除</button>
                             </div>
@@ -1241,8 +1294,18 @@ function App() {
                       placeholder="例如：1900"
                     />
                   </div>
+                  <div className="form-group">
+                    <label>每股成本 (TWD)</label>
+                    <input 
+                      type="number" 
+                      className="url-input" 
+                      value={accCostPrice} 
+                      onChange={e => setAccCostPrice(e.target.value)} 
+                      placeholder="例如：2153"
+                    />
+                  </div>
                   <p style={{ gridColumn: '1 / -1', fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>
-                    💡 填寫代號與股數後，系統每小時自動從 Yahoo Finance 更新股價並重算水位。
+                    💡 成本手動設定；現價每小時自動從 Yahoo Finance 抓取，市值＝現價 × 股數。
                   </p>
                 </>
               )}

@@ -1173,3 +1173,13 @@ body {
   .modal-content { width: 100%; max-width: 100%; border-radius: 24px 24px 0 0; padding: 1.75rem 1.25rem calc(1.75rem + env(safe-area-inset-bottom)); max-height: 92vh; }
   .modal-content h2 { font-size: 18px; padding-right: 2rem; }
 }
+
+/* auto stock info (cost vs live price) */
+.v1-stock-info { display: flex; flex-direction: column; gap: 2px; margin: 8px 0 6px; }
+.v1-stock-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 2px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 14px; }
+.v1-stock-row.total { border-bottom: none; padding-top: 12px; }
+.v1-stock-row .num { font-size: 16px; font-weight: 700; }
+.pnl-up { color: #34d399; font-weight: 700; }
+.pnl-down { color: #f87171; font-weight: 700; }
+.v1-auto-note { font-size: 12px; color: var(--text-secondary); margin: 6px 0 4px; }
+.v1-row-d .pnl-up, .v1-row-d .pnl-down { font-weight: 600; }
