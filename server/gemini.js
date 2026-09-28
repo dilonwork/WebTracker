@@ -1,6 +1,6 @@
 const axios = require('axios');
 
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://your-ollama-host:11434';
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 const MODEL_NAME = process.env.OLLAMA_MODEL || 'batiai/gemma4-e4b:q4';
 
 // Helper to delay execution

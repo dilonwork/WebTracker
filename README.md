@@ -48,23 +48,13 @@
 npm install
 ```
 
-建立 `.env`：
+建立 `.env`（完整變數清單與說明見 `.env.example`）：
 
+```bash
+cp .env.example .env
 ```
-# 資料庫（必填）
-DB_HOST=your_db_host
-DB_ACCOUNT=your_db_user
-DB_PASSWORD=your_db_password
-DB_NAME=webtracker
 
-# AI 分析用 Ollama（有預設值，可省略）
-OLLAMA_URL=http://your-ollama-host:11434
-OLLAMA_MODEL=batiai/gemma4-e4b:q4
-
-# 連接埠（有預設值，可省略）
-BACKEND_PORT=8888
-FRONTEND_PORT=8080
-```
+必填：`DB_HOST`、`DB_ACCOUNT`、`DB_PASSWORD`（沒有預設值）；其他變數（`DB_NAME`、`OLLAMA_URL`、`OLLAMA_MODEL`、`BACKEND_PORT`、`FRONTEND_PORT`、`TZ`）都有預設值，可省略。注意：`.env` 已被 `.gitignore` 排除、不會進版控，內網 IP、帳號密碼等敏感資訊請只放在 `.env`。
 
 啟動（前端 + 後端同時跑）：
 
