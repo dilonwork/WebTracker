@@ -1190,3 +1190,9 @@ body {
 .v1-addshares-preview { font-size: 13px; color: var(--text-secondary); margin: 10px 0 2px; }
 .v1-addshares-preview::first-letter { font-weight: 700; }
 .v1-addshares-btn { width: 100%; margin-top: 8px; }
+
+/* realized P&L trades list */
+.v1-trades { margin-top: 10px; display: flex; flex-direction: column; gap: 2px; }
+.v1-trade-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 2px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; color: var(--text-secondary); }
+.v1-trade-row:last-child { border-bottom: none; }
+.v1-trade-row .pnl-up, .v1-trade-row .pnl-down { font-weight: 700; font-size: 14px; }

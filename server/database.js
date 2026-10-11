@@ -88,6 +88,19 @@ const initDb = async () => {
     await pool.query(`ALTER TABLE fin_accounts ADD COLUMN IF NOT EXISTS cost_price NUMERIC(15, 4) DEFAULT 0`);
     await pool.query(`ALTER TABLE fin_accounts ADD COLUMN IF NOT EXISTS last_price NUMERIC(15, 4) DEFAULT 0`);
 
+    // Realized P&L records for stock sells (賣出記錄)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS fin_realized_pnl (
+        id SERIAL PRIMARY KEY,
+        account_id INTEGER REFERENCES fin_accounts(id) ON DELETE CASCADE,
+        shares_sold NUMERIC(15, 4) NOT NULL,
+        sell_price NUMERIC(15, 4) NOT NULL,
+        cost_basis NUMERIC(15, 4) NOT NULL,
+        realized_pnl NUMERIC(15, 2) NOT NULL,
+        sold_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // Seed default accounts if empty
     const { rows } = await pool.query('SELECT COUNT(*) FROM fin_accounts');
     if (parseInt(rows[0].count, 10) === 0) {

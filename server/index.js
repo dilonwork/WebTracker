@@ -245,6 +245,69 @@ app.post('/api/financials/accounts/:id/add-shares', async (req, res) => {
   }
 });
 
+// 4.56. Sell shares from a stock account (賣出): reduces shares, records realized P&L
+app.post('/api/financials/accounts/:id/sell-shares', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const sellShares = Number(req.body.shares);
+    const sellPrice = Number(req.body.price);
+    if (!Number.isFinite(sellShares) || sellShares <= 0) {
+      return res.status(400).json({ error: 'shares must be a positive number' });
+    }
+    if (!Number.isFinite(sellPrice) || sellPrice < 0) {
+      return res.status(400).json({ error: 'price must be a non-negative number' });
+    }
+    const { rows } = await db.query('SELECT shares, cost_price FROM fin_accounts WHERE id = $1', [id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Account not found' });
+    const oldShares = Number(rows[0].shares || 0);
+    const costBasis = Number(rows[0].cost_price || 0);
+    if (sellShares > oldShares) {
+      return res.status(400).json({ error: `cannot sell ${sellShares} shares, only ${oldShares} held` });
+    }
+    const newShares = Math.round((oldShares - sellShares) * 10000) / 10000;
+    const realized = Math.round((sellPrice - costBasis) * sellShares * 100) / 100;
+    await db.query(
+      'UPDATE fin_accounts SET shares = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [newShares, id]
+    );
+    await db.query(
+      `INSERT INTO fin_realized_pnl (account_id, shares_sold, sell_price, cost_basis, realized_pnl)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [id, sellShares, sellPrice, costBasis, realized]
+    );
+    res.json({ id, shares: newShares, realized_pnl: realized });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4.57. Realized P&L history for a stock account
+app.get('/api/financials/accounts/:id/realized', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { rows } = await db.query(
+      `SELECT id, shares_sold, sell_price, cost_basis, realized_pnl, sold_at
+       FROM fin_realized_pnl WHERE account_id = $1 ORDER BY sold_at DESC, id DESC`,
+      [id]
+    );
+    const total = rows.reduce((sum, r) => sum + Number(r.realized_pnl || 0), 0);
+    res.json({
+      total_realized: Math.round(total * 100) / 100,
+      count: rows.length,
+      trades: rows.map(r => ({
+        id: r.id,
+        shares: Number(r.shares_sold),
+        sell_price: Number(r.sell_price),
+        cost_basis: Number(r.cost_basis),
+        realized_pnl: Number(r.realized_pnl),
+        sold_at: r.sold_at
+      }))
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 4.6. Manually trigger Yahoo stock price refresh
 app.post('/api/financials/stocks/refresh', async (req, res) => {  try {
     const { updateStockPrices } = require('./stock');

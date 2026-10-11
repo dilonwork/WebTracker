@@ -275,6 +275,11 @@ function App() {
   const [addingSharesId, setAddingSharesId] = useState<number | null>(null);
   const [addQty, setAddQty] = useState('');
   const [addPrice, setAddPrice] = useState('');
+  // 賣出 (realized P&L)
+  const [sellingSharesId, setSellingSharesId] = useState<number | null>(null);
+  const [sellQty, setSellQty] = useState('');
+  const [sellPrice, setSellPrice] = useState('');
+  const [realizedCache, setRealizedCache] = useState<Record<number, { total_realized: number; count: number; trades: any[] }>>({});
 
   const SUBTYPE_LABEL: Record<string, string> = {
     cash: '現金', deposit: '定存', stock: '股票', currency: '外幣', loan: '信貸', mortgage: '房貸',
@@ -347,6 +352,41 @@ function App() {
       }
     } catch (err: any) {
       alert('加碼請求失敗: ' + err.message);
+    }
+  };
+
+  // 賣出：後端扣股數並記錄實現損益
+  const fetchRealized = (id: number) => {
+    fetch(`/api/financials/accounts/${id}/realized`)
+      .then(res => res.json())
+      .then(data => setRealizedCache(prev => ({ ...prev, [id]: data })))
+      .catch(() => {});
+  };
+
+  const handleSellShares = async (acc: FinancialAccount) => {
+    const qty = Number(sellQty);
+    const price = Number(sellPrice);
+    if (!qty || qty <= 0) { alert('請輸入賣出股數'); return; }
+    if (qty > Number(acc.shares || 0)) { alert(`持有僅 ${Number(acc.shares || 0).toLocaleString('zh-TW')} 股`); return; }
+    if (!Number.isFinite(price) || price < 0) { alert('請輸入賣出單價'); return; }
+    try {
+      const res = await fetch(`/api/financials/accounts/${acc.id}/sell-shares`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shares: qty, price })
+      });
+      if (res.ok) {
+        setSellingSharesId(null);
+        setSellQty('');
+        setSellPrice('');
+        fetchAccounts();
+        fetchRealized(acc.id);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert('賣出失敗：' + (data.error || res.statusText));
+      }
+    } catch (err: any) {
+      alert('賣出請求失敗: ' + err.message);
     }
   };
 
@@ -808,7 +848,11 @@ function App() {
                     const stockPnlPct = stockCost > 0 ? (stockPnl / stockCost) * 100 : 0;
                     return (
                       <div key={acc.id} className={`v1-mrow glass-panel${expanded ? ' open' : ''}${dirty ? ' dirty' : ''}`}>
-                        <div className="v1-mrow-head" onClick={() => setExpandedAccId(expanded ? null : acc.id)}>
+                        <div className="v1-mrow-head" onClick={() => {
+                          const next = expanded ? null : acc.id;
+                          setExpandedAccId(next);
+                          if (next != null && acc.subtype === 'stock' && acc.ticker) fetchRealized(acc.id);
+                        }}>
                           <div className="v1-ic" style={{ background: st.bg }}>{st.icon}</div>
                           <div className="v1-mrow-info">
                             <div className="v1-row-n">{acc.name}{dirty && <span className="v1-dirty-dot" />}</div>
@@ -848,6 +892,14 @@ function App() {
                                   </div>
                                 </div>
                                 <p className="v1-auto-note">💡 市值每小時自動從 Yahoo 更新；成本請用 ✏️ 編輯。</p>
+                                {realizedCache[acc.id] && realizedCache[acc.id].count > 0 && (
+                                  <div className="v1-stock-row total">
+                                    <span className="v1-label">已實現損益（{realizedCache[acc.id].count} 筆）</span>
+                                    <span className={`num ${realizedCache[acc.id].total_realized >= 0 ? 'pnl-up' : 'pnl-down'}`}>
+                                      {realizedCache[acc.id].total_realized >= 0 ? '+' : ''}${Math.round(realizedCache[acc.id].total_realized).toLocaleString('zh-TW')}
+                                    </span>
+                                  </div>
+                                )}
                                 {addingSharesId === acc.id ? (
                                   <div className="v1-addshares">
                                     <div className="v1-addshares-grid">
@@ -872,10 +924,53 @@ function App() {
                                       <button className="btn btn-secondary" onClick={() => { setAddingSharesId(null); setAddQty(''); setAddPrice(''); }}>取消</button>
                                     </div>
                                   </div>
+                                ) : sellingSharesId === acc.id ? (
+                                  <div className="v1-addshares">
+                                    <div className="v1-addshares-grid">
+                                      <div>
+                                        <label className="v1-label">賣出股數</label>
+                                        <input type="number" inputMode="numeric" className="url-input"
+                                          value={sellQty} onChange={e => setSellQty(e.target.value)} placeholder="例如：1000" />
+                                      </div>
+                                      <div>
+                                        <label className="v1-label">賣出單價</label>
+                                        <input type="number" inputMode="decimal" className="url-input"
+                                          value={sellPrice} onChange={e => setSellPrice(e.target.value)} placeholder="例如：2500" />
+                                      </div>
+                                    </div>
+                                    {Number(sellQty) > 0 && Number(sellPrice) >= 0 && sellPrice !== '' && (
+                                      <p className="v1-addshares-preview">
+                                        實現損益：<span className={(Number(sellPrice) - Number(acc.cost_price || 0)) * Number(sellQty) >= 0 ? 'pnl-up' : 'pnl-down'}>
+                                          {(Number(sellPrice) - Number(acc.cost_price || 0)) * Number(sellQty) >= 0 ? '+' : ''}${Math.round((Number(sellPrice) - Number(acc.cost_price || 0)) * Number(sellQty)).toLocaleString('zh-TW')}
+                                        </span>
+                                      </p>
+                                    )}
+                                    <div className="v1-mrow-actions">
+                                      <button className="btn btn-danger" onClick={() => handleSellShares(acc)}>確認賣出</button>
+                                      <button className="btn btn-secondary" onClick={() => { setSellingSharesId(null); setSellQty(''); setSellPrice(''); }}>取消</button>
+                                    </div>
+                                  </div>
                                 ) : (
-                                  <button className="btn btn-secondary v1-addshares-btn" onClick={() => { setAddingSharesId(acc.id); setAddQty(''); setAddPrice(String(acc.last_price || '')); }}>
-                                    ➕ 加碼買進
-                                  </button>
+                                  <div className="v1-addshares-grid">
+                                    <button className="btn btn-secondary" onClick={() => { setAddingSharesId(acc.id); setAddQty(''); setAddPrice(String(acc.last_price || '')); }}>
+                                      ➕ 加碼買進
+                                    </button>
+                                    <button className="btn btn-secondary" onClick={() => { setSellingSharesId(acc.id); setSellQty(''); setSellPrice(String(acc.last_price || '')); }}>
+                                      ➖ 賣出
+                                    </button>
+                                  </div>
+                                )}
+                                {realizedCache[acc.id] && realizedCache[acc.id].trades.length > 0 && addingSharesId !== acc.id && sellingSharesId !== acc.id && (
+                                  <div className="v1-trades">
+                                    {realizedCache[acc.id].trades.slice(0, 5).map(t => (
+                                      <div key={t.id} className="v1-trade-row">
+                                        <span>{new Date(t.sold_at).toLocaleDateString('zh-TW')} 賣出 {Number(t.shares).toLocaleString('zh-TW')} 股 @ ${Number(t.sell_price).toLocaleString('zh-TW')}</span>
+                                        <span className={t.realized_pnl >= 0 ? 'pnl-up' : 'pnl-down'}>
+                                          {t.realized_pnl >= 0 ? '+' : ''}${Math.round(t.realized_pnl).toLocaleString('zh-TW')}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
                                 )}
                               </>
                             ) : (
