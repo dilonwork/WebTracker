@@ -95,11 +95,9 @@ async function updateStockPrices() {
         'UPDATE fin_accounts SET balance = $1, last_price = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
         [balance, quote.price, acc.id]
       );
-      await db.query(
-        'INSERT INTO fin_account_history (account_id, balance) VALUES ($1, $2)',
-        [acc.id, balance]
-      );
-      console.log(`[STOCK] ${acc.ticker}: ${quote.price} x ${acc.shares} = ${balance} ${acc.currency}`);
+      // History 去重：價格沒變就不寫，避免每小時膨脹
+      const recorded = await db.recordHistoryIfChanged(acc.id, balance);
+      console.log(`[STOCK] ${acc.ticker}: ${quote.price} x ${acc.shares} = ${balance} ${acc.currency}${recorded ? '' : ' (history skipped, unchanged)'}`);
       updated++;
     }
   } catch (err) {

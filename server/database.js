@@ -124,7 +124,27 @@ const initDb = async () => {
 
 initDb();
 
+/**
+ * History 去重：只有餘額真的變了才寫入 fin_account_history。
+ * 回傳 true 表示有寫入，false 表示與上一筆相同而跳過。
+ */
+async function recordHistoryIfChanged(accountId, balance) {
+  const b = Math.round(Number(balance) * 100) / 100;
+  if (!Number.isFinite(b)) return false;
+  const { rows } = await pool.query(
+    `SELECT balance FROM fin_account_history WHERE account_id = $1 ORDER BY recorded_at DESC, id DESC LIMIT 1`,
+    [accountId]
+  );
+  if (rows.length > 0 && Number(rows[0].balance) === b) return false;
+  await pool.query(
+    `INSERT INTO fin_account_history (account_id, balance) VALUES ($1, $2)`,
+    [accountId, b]
+  );
+  return true;
+}
+
 module.exports = {
   query: (text, params) => pool.query(text, params),
-  pool
+  pool,
+  recordHistoryIfChanged
 };

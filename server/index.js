@@ -189,11 +189,8 @@ app.put('/api/financials/accounts/:id', async (req, res) => {
     );
     if (rowCount === 0) return res.status(404).json({ error: "Account not found" });
 
-    // Record history on update
-    await db.query(
-      `INSERT INTO fin_account_history (account_id, balance) VALUES ($1, $2)`,
-      [id, balance || 0]
-    );
+    // Record history on update (去重：餘額沒變不寫)
+    await db.recordHistoryIfChanged(id, balance || 0);
 
     res.json({ id, name, institution, type, subtype, balance, currency, monthly_payment, interest_rate });
   } catch (err) {
@@ -211,11 +208,8 @@ app.put('/api/financials/accounts/batch/balances', async (req, res) => {
     for (const item of balances) {
       await db.query('UPDATE fin_accounts SET balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [item.balance, item.id]);
       
-      // Record history on batch update
-      await db.query(
-        `INSERT INTO fin_account_history (account_id, balance) VALUES ($1, $2)`,
-        [item.id, item.balance || 0]
-      );
+      // Record history on batch update (去重：餘額沒變不寫)
+      await db.recordHistoryIfChanged(item.id, item.balance || 0);
     }
     res.json({ success: true });
   } catch (err) {
