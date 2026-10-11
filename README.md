@@ -21,6 +21,7 @@
 - 股票代號、持有股數、**每股成本手動設定**
 - **現價每小時整點從 Yahoo Finance 自動更新**，市值＝現價 × 股數
 - 損益自動計算（帳戶列顯示損益 %，點開可見現價、成本總額、損益金額）
+- **加碼買進**：輸入加碼股數與買進單價，後端自動重算加權平均成本；送出前即時預覽加碼後均價與總股數
 
 ### 🧾 近期待繳（demands）
 - 未來現金需求的新增／刪除，含金額與到期日
@@ -90,6 +91,7 @@ npm run build   # tsc + vite build，產出 dist/
 | GET / POST | `/api/financials/accounts` | 帳戶清單／新增帳戶 |
 | PUT / DELETE | `/api/financials/accounts/:id` | 更新／刪除帳戶 |
 | PUT | `/api/financials/accounts/batch/balances` | 批次儲存水位 |
+| POST | `/api/financials/accounts/:id/add-shares` | 加碼買進（加權平均成本重算）|
 | POST | `/api/financials/stocks/refresh` | 手動觸發股票現價更新 |
 | GET | `/api/financials/accounts/:id/history` | 單一帳戶水位歷史 |
 | GET | `/api/financials/history/all` | 全帳戶水位歷史（走勢圖用）|

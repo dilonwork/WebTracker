@@ -223,9 +223,36 @@ app.put('/api/financials/accounts/batch/balances', async (req, res) => {
   }
 });
 
-// 4.6. Manually trigger Yahoo stock price refresh
-app.post('/api/financials/stocks/refresh', async (req, res) => {
+// 4.55. Add shares to a stock account (加碼買進): recalculates weighted average cost
+app.post('/api/financials/accounts/:id/add-shares', async (req, res) => {
   try {
+    const id = parseInt(req.params.id, 10);
+    const addShares = Number(req.body.shares);
+    const buyPrice = Number(req.body.price);
+    if (!Number.isFinite(addShares) || addShares <= 0) {
+      return res.status(400).json({ error: 'shares must be a positive number' });
+    }
+    if (!Number.isFinite(buyPrice) || buyPrice < 0) {
+      return res.status(400).json({ error: 'price must be a non-negative number' });
+    }
+    const { rows } = await db.query('SELECT shares, cost_price FROM fin_accounts WHERE id = $1', [id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Account not found' });
+    const oldShares = Number(rows[0].shares || 0);
+    const oldCost = Number(rows[0].cost_price || 0);
+    const newShares = oldShares + addShares;
+    const newCost = Math.round(((oldCost * oldShares + buyPrice * addShares) / newShares) * 100) / 100;
+    await db.query(
+      'UPDATE fin_accounts SET shares = $1, cost_price = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
+      [newShares, newCost, id]
+    );
+    res.json({ id, shares: newShares, cost_price: newCost });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4.6. Manually trigger Yahoo stock price refresh
+app.post('/api/financials/stocks/refresh', async (req, res) => {  try {
     const { updateStockPrices } = require('./stock');
     const updated = await updateStockPrices();
     res.json({ success: true, updated });

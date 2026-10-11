@@ -271,6 +271,10 @@ function App() {
 
   // Balance Batch Updates
   const [expandedAccId, setExpandedAccId] = useState<number | null>(null);
+  // 加碼買進 (weighted average cost)
+  const [addingSharesId, setAddingSharesId] = useState<number | null>(null);
+  const [addQty, setAddQty] = useState('');
+  const [addPrice, setAddPrice] = useState('');
 
   const SUBTYPE_LABEL: Record<string, string> = {
     cash: '現金', deposit: '定存', stock: '股票', currency: '外幣', loan: '信貸', mortgage: '房貸',
@@ -317,6 +321,32 @@ function App() {
       }
     } catch (err: any) {
       alert('更新請求失敗: ' + err.message);
+    }
+  };
+
+  // 加碼買進：後端重算加權平均成本
+  const handleAddShares = async (acc: FinancialAccount) => {
+    const qty = Number(addQty);
+    const price = Number(addPrice);
+    if (!qty || qty <= 0) { alert('請輸入加碼股數'); return; }
+    if (!Number.isFinite(price) || price < 0) { alert('請輸入買進單價'); return; }
+    try {
+      const res = await fetch(`/api/financials/accounts/${acc.id}/add-shares`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shares: qty, price })
+      });
+      if (res.ok) {
+        setAddingSharesId(null);
+        setAddQty('');
+        setAddPrice('');
+        fetchAccounts();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert('加碼失敗：' + (data.error || res.statusText));
+      }
+    } catch (err: any) {
+      alert('加碼請求失敗: ' + err.message);
     }
   };
 
@@ -818,6 +848,35 @@ function App() {
                                   </div>
                                 </div>
                                 <p className="v1-auto-note">💡 市值每小時自動從 Yahoo 更新；成本請用 ✏️ 編輯。</p>
+                                {addingSharesId === acc.id ? (
+                                  <div className="v1-addshares">
+                                    <div className="v1-addshares-grid">
+                                      <div>
+                                        <label className="v1-label">加碼股數</label>
+                                        <input type="number" inputMode="numeric" className="url-input"
+                                          value={addQty} onChange={e => setAddQty(e.target.value)} placeholder="例如：100" />
+                                      </div>
+                                      <div>
+                                        <label className="v1-label">買進單價</label>
+                                        <input type="number" inputMode="decimal" className="url-input"
+                                          value={addPrice} onChange={e => setAddPrice(e.target.value)} placeholder="例如：2400" />
+                                      </div>
+                                    </div>
+                                    {Number(addQty) > 0 && Number(addPrice) >= 0 && addPrice !== '' && (
+                                      <p className="v1-addshares-preview">
+                                        加碼後均價：${(((Number(acc.cost_price || 0) * Number(acc.shares || 0)) + (Number(addPrice) * Number(addQty))) / (Number(acc.shares || 0) + Number(addQty))).toFixed(2)} × {(Number(acc.shares || 0) + Number(addQty)).toLocaleString('zh-TW')} 股
+                                      </p>
+                                    )}
+                                    <div className="v1-mrow-actions">
+                                      <button className="btn btn-primary" onClick={() => handleAddShares(acc)}>確認加碼</button>
+                                      <button className="btn btn-secondary" onClick={() => { setAddingSharesId(null); setAddQty(''); setAddPrice(''); }}>取消</button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <button className="btn btn-secondary v1-addshares-btn" onClick={() => { setAddingSharesId(acc.id); setAddQty(''); setAddPrice(String(acc.last_price || '')); }}>
+                                    ➕ 加碼買進
+                                  </button>
+                                )}
                               </>
                             ) : (
                               <>

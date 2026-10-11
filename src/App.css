@@ -1183,3 +1183,10 @@ body {
 .pnl-down { color: #f87171; font-weight: 700; }
 .v1-auto-note { font-size: 12px; color: var(--text-secondary); margin: 6px 0 4px; }
 .v1-row-d .pnl-up, .v1-row-d .pnl-down { font-weight: 600; }
+
+/* add-shares (加碼買進) */
+.v1-addshares { margin-top: 10px; }
+.v1-addshares-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.v1-addshares-preview { font-size: 13px; color: var(--text-secondary); margin: 10px 0 2px; }
+.v1-addshares-preview::first-letter { font-weight: 700; }
+.v1-addshares-btn { width: 100%; margin-top: 8px; }
