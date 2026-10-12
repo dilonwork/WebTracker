@@ -81,6 +81,7 @@ async function updateStockPrices() {
     for (const acc of rows) {
       const quote = await fetchYahooQuote(acc.ticker);
       if (!quote) continue;
+      const prevPrice = Number(acc.last_price || 0);
       let balance = quote.price * Number(acc.shares);
       if (quote.currency && quote.currency !== String(acc.currency).toUpperCase()) {
         const fx = await fetchFxRate(quote.currency, acc.currency);
@@ -97,6 +98,27 @@ async function updateStockPrices() {
       );
       // History 去重：價格沒變就不寫，避免每小時膨脹
       const recorded = await db.recordHistoryIfChanged(acc.id, balance);
+      // 股價提醒：邊緣觸發（前次在安全側、本次穿越才告警，避免重複洗版）
+      if (prevPrice > 0) {
+        const stopLoss = Number(acc.stop_loss || 0);
+        const target = Number(acc.target_price || 0);
+        if (stopLoss > 0 && prevPrice > stopLoss && quote.price <= stopLoss) {
+          await db.query(
+            `INSERT INTO fin_price_alerts (account_id, alert_type, threshold, price_at_trigger)
+             VALUES ($1, 'stop_loss', $2, $3)`,
+            [acc.id, stopLoss, quote.price]
+          );
+          console.log(`[STOCK] ⚠️ ${acc.ticker} 跌破停損價 ${stopLoss}（現價 ${quote.price}）`);
+        }
+        if (target > 0 && prevPrice < target && quote.price >= target) {
+          await db.query(
+            `INSERT INTO fin_price_alerts (account_id, alert_type, threshold, price_at_trigger)
+             VALUES ($1, 'target', $2, $3)`,
+            [acc.id, target, quote.price]
+          );
+          console.log(`[STOCK] 🎯 ${acc.ticker} 突破目標價 ${target}（現價 ${quote.price}）`);
+        }
+      }
       console.log(`[STOCK] ${acc.ticker}: ${quote.price} x ${acc.shares} = ${balance} ${acc.currency}${recorded ? '' : ' (history skipped, unchanged)'}`);
       updated++;
     }

@@ -38,6 +38,8 @@ interface FinancialAccount {
   shares: number;
   cost_price: number;
   last_price: number;
+  stop_loss: number;
+  target_price: number;
   updated_at: string;
 }
 
@@ -103,6 +105,10 @@ function App() {
   const [accTicker, setAccTicker] = useState('');
   const [accShares, setAccShares] = useState('');
   const [accCostPrice, setAccCostPrice] = useState('');
+  const [accStopLoss, setAccStopLoss] = useState('');
+  const [accTargetPrice, setAccTargetPrice] = useState('');
+  // 股價提醒
+  const [alertsCache, setAlertsCache] = useState<Record<number, { unacknowledged: number; alerts: any[] }>>({});
 
   // Form States - Cash Demands
   const [demandDesc, setDemandDesc] = useState('');
@@ -363,6 +369,29 @@ function App() {
       .catch(() => {});
   };
 
+  // 股價提醒
+  const fetchAlerts = (id: number) => {
+    fetch(`/api/financials/accounts/${id}/alerts`)
+      .then(res => res.json())
+      .then(data => setAlertsCache(prev => ({ ...prev, [id]: data })))
+      .catch(() => {});
+  };
+
+  const handleAcknowledgeAlert = async (accountId: number, alertId: number) => {
+    try {
+      const res = await fetch(`/api/financials/alerts/${alertId}/acknowledge`, { method: 'POST' });
+      if (res.ok) fetchAlerts(accountId);
+    } catch { /* ignore */ }
+  };
+
+  // 帳戶載入後，預抓各股票的未確認告警（列上徽章用）
+  useEffect(() => {
+    accounts.forEach(a => {
+      if (a.subtype === 'stock' && a.ticker && alertsCache[a.id] === undefined) fetchAlerts(a.id);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts]);
+
   const handleSellShares = async (acc: FinancialAccount) => {
     const qty = Number(sellQty);
     const price = Number(sellPrice);
@@ -431,6 +460,8 @@ function App() {
       setAccTicker(acc.ticker || '');
       setAccShares(acc.shares ? acc.shares.toString() : '');
       setAccCostPrice(acc.cost_price ? acc.cost_price.toString() : '');
+      setAccStopLoss(acc.stop_loss ? acc.stop_loss.toString() : '');
+      setAccTargetPrice(acc.target_price ? acc.target_price.toString() : '');
     } else {
       setAccEditingId(null);
       setAccName('');
@@ -444,6 +475,8 @@ function App() {
       setAccTicker('');
       setAccShares('');
       setAccCostPrice('');
+      setAccStopLoss('');
+      setAccTargetPrice('');
     }
     setIsAccountModalOpen(true);
   };
@@ -460,7 +493,9 @@ function App() {
       interest_rate: Number(accInterestRate) || 0,
       ticker: accTicker.trim().toUpperCase(),
       shares: Number(accShares) || 0,
-      cost_price: Number(accCostPrice) || 0
+      cost_price: Number(accCostPrice) || 0,
+      stop_loss: Number(accStopLoss) || 0,
+      target_price: Number(accTargetPrice) || 0
     };
 
     const method = accEditingId ? 'PUT' : 'POST';
@@ -851,13 +886,15 @@ function App() {
                         <div className="v1-mrow-head" onClick={() => {
                           const next = expanded ? null : acc.id;
                           setExpandedAccId(next);
-                          if (next != null && acc.subtype === 'stock' && acc.ticker) fetchRealized(acc.id);
+                          if (next != null && acc.subtype === 'stock' && acc.ticker) { fetchRealized(acc.id); fetchAlerts(acc.id); }
                         }}>
                           <div className="v1-ic" style={{ background: st.bg }}>{st.icon}</div>
                           <div className="v1-mrow-info">
                             <div className="v1-row-n">{acc.name}{dirty && <span className="v1-dirty-dot" />}</div>
                             <div className="v1-row-d">{acc.institution} · {SUBTYPE_LABEL[acc.subtype] || acc.subtype}{acc.currency !== 'TWD' ? ` · ${acc.currency}` : ''}{isAutoStock && stockCost > 0 && (
                               <span className={stockPnl >= 0 ? 'pnl-up' : 'pnl-down'}> · 損益 {stockPnl >= 0 ? '+' : ''}{stockPnlPct.toFixed(1)}%</span>
+                            )}{isAutoStock && alertsCache[acc.id] && alertsCache[acc.id].unacknowledged > 0 && (
+                              <span className="v1-alert-badge"> · ⚠️ {alertsCache[acc.id].unacknowledged} 則告警</span>
                             )}</div>
                           </div>
                           <div className={`v1-row-b num${dirty ? ' dirty-val' : ''}`}>${Number(cur).toLocaleString('zh-TW')}</div>
@@ -892,6 +929,29 @@ function App() {
                                   </div>
                                 </div>
                                 <p className="v1-auto-note">💡 市值每小時自動從 Yahoo 更新；成本請用 ✏️ 編輯。</p>
+                                {(Number(acc.stop_loss) > 0 || Number(acc.target_price) > 0) && (
+                                  <div className="v1-stock-row">
+                                    <span className="v1-label">🔔 告警設定</span>
+                                    <span className="v1-alert-cfg">
+                                      {Number(acc.stop_loss) > 0 && <span>停損 ${Number(acc.stop_loss).toLocaleString('zh-TW')}</span>}
+                                      {Number(acc.target_price) > 0 && <span>目標 ${Number(acc.target_price).toLocaleString('zh-TW')}</span>}
+                                    </span>
+                                  </div>
+                                )}
+                                {alertsCache[acc.id] && alertsCache[acc.id].alerts.filter(a => !a.acknowledged).length > 0 && (
+                                  <div className="v1-alerts">
+                                    {alertsCache[acc.id].alerts.filter(a => !a.acknowledged).map(a => (
+                                      <div key={a.id} className={`v1-alert-row ${a.alert_type}`}>
+                                        <span>
+                                          {a.alert_type === 'stop_loss' ? '⚠️ 跌破停損' : '🎯 突破目標'}
+                                          {' '}${Number(a.threshold).toLocaleString('zh-TW')}
+                                          （觸發價 ${Number(a.price_at_trigger).toLocaleString('zh-TW')}）
+                                        </span>
+                                        <button className="btn btn-secondary v1-alert-ack" onClick={() => handleAcknowledgeAlert(acc.id, a.id)}>知道了</button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                                 {realizedCache[acc.id] && realizedCache[acc.id].count > 0 && (
                                   <div className="v1-stock-row total">
                                     <span className="v1-label">已實現損益（{realizedCache[acc.id].count} 筆）</span>
@@ -1458,8 +1518,28 @@ function App() {
                       placeholder="例如：2153"
                     />
                   </div>
+                  <div className="form-group">
+                    <label>停損價（股票計價幣別）</label>
+                    <input 
+                      type="number" 
+                      className="url-input" 
+                      value={accStopLoss} 
+                      onChange={e => setAccStopLoss(e.target.value)} 
+                      placeholder="例如：2000，留空不設"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>目標價（股票計價幣別）</label>
+                    <input 
+                      type="number" 
+                      className="url-input" 
+                      value={accTargetPrice} 
+                      onChange={e => setAccTargetPrice(e.target.value)} 
+                      placeholder="例如：2800，留空不設"
+                    />
+                  </div>
                   <p style={{ gridColumn: '1 / -1', fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>
-                    💡 成本手動設定；現價每小時自動從 Yahoo Finance 抓取，市值＝現價 × 股數。
+                    💡 成本手動設定；現價每小時自動從 Yahoo Finance 抓取，市值＝現價 × 股數。設停損／目標價後，每小時檢查穿越即告警。
                   </p>
                 </>
               )}

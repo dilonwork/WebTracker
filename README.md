@@ -24,6 +24,7 @@
 - 損益自動計算（帳戶列顯示損益 %，點開可見現價、成本總額、損益金額）
 - **加碼買進**：輸入加碼股數與買進單價，後端自動重算加權平均成本；送出前即時預覽加碼後均價與總股數
 - **賣出記錄**：輸入賣出股數與賣出單價，自動扣減股數並記錄實現損益；點開帳戶可見累計已實現損益與每筆賣出明細
+- **股價提醒**：每檔股票可設停損價／目標價（股票計價幣別）；每小時更新時採邊緣觸發檢查，穿越即產生告警，帳戶列顯示 ⚠️ 徽章，點開可確認（知道了）
 
 ### 🧾 近期待繳（demands）
 - 未來現金需求的新增／刪除，含金額與到期日
@@ -96,6 +97,8 @@ npm run build   # tsc + vite build，產出 dist/
 | POST | `/api/financials/accounts/:id/add-shares` | 加碼買進（加權平均成本重算）|
 | POST | `/api/financials/accounts/:id/sell-shares` | 賣出（扣減股數＋記錄實現損益）|
 | GET | `/api/financials/accounts/:id/realized` | 單一帳戶實現損益明細與累計 |
+| GET | `/api/financials/accounts/:id/alerts` | 單一帳戶股價告警記錄 |
+| POST | `/api/financials/alerts/:id/acknowledge` | 確認（已讀）一則股價告警 |
 | POST | `/api/financials/stocks/refresh` | 手動觸發股票現價更新 |
 | GET | `/api/financials/accounts/:id/history` | 單一帳戶水位歷史 |
 | GET | `/api/financials/history/all` | 全帳戶水位歷史（走勢圖用）|
