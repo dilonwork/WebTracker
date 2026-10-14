@@ -4,6 +4,8 @@
 
 ![系統架構](docs/images/architecture.svg)
 
+![股票帳戶：SEPA 體檢與股價告警](docs/images/stock-sepa.png)
+
 ## 功能
 
 ### 📊 財務儀表板（dashboard）
