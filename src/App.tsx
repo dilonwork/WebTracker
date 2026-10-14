@@ -109,6 +109,8 @@ function App() {
   const [accTargetPrice, setAccTargetPrice] = useState('');
   // 股價提醒
   const [alertsCache, setAlertsCache] = useState<Record<number, { unacknowledged: number; alerts: any[] }>>({});
+  // SEPA 每日體檢
+  const [sepaCache, setSepaCache] = useState<Record<number, any>>({});
 
   // Form States - Cash Demands
   const [demandDesc, setDemandDesc] = useState('');
@@ -291,6 +293,31 @@ function App() {
     cash: '現金', deposit: '定存', stock: '股票', currency: '外幣', loan: '信貸', mortgage: '房貸',
   };
 
+  // 告警類型中文標籤（含 SEPA 規則告警）
+  const ALERT_LABEL: Record<string, { icon: string; text: string }> = {
+    stop_loss: { icon: '⚠️', text: '跌破停損' },
+    target: { icon: '🎯', text: '突破目標' },
+    sepa_50ma_break: { icon: '⚠️', text: '收盤破 50 日線（SEPA 出場訊號）' },
+    sepa_10w_break: { icon: '⚠️', text: '跌破 10 週線（第一級減半訊號）' },
+    sepa_200ma_break: { icon: '⛔', text: '跌破 200 日線（出清訊號）' },
+    sepa_stop_7pct: { icon: '🛑', text: '距成本 -7%（停損）' },
+    sepa_overheat: { icon: '🔥', text: '過熱（距 50 日線 +20%）' },
+  };
+
+  // SEPA 8 條趨勢模板中文標籤
+  const SEPA_TEMPLATE_LABELS = [
+    '股價 > 150/200 日線',
+    '150 日線 > 200 日線',
+    '200 日線上升中',
+    '50 日線 > 150/200 日線',
+    '股價 > 50 日線',
+    '較 52 週低點 +30%',
+    '距 52 週高點 25% 內',
+    '相對強度轉強（參考）',
+  ];
+
+  const fmtNum = (v: any) => (v == null ? '—' : '$' + Number(v).toLocaleString('zh-TW'));
+
   const dirtyCount = accounts.filter(a => {
     // 自動股票由每小時排程維護水位，不列入手動未儲存
     if (a.subtype === 'stock' && a.ticker) return false;
@@ -382,6 +409,14 @@ function App() {
       const res = await fetch(`/api/financials/alerts/${alertId}/acknowledge`, { method: 'POST' });
       if (res.ok) fetchAlerts(accountId);
     } catch { /* ignore */ }
+  };
+
+  // SEPA 每日體檢
+  const fetchSepa = (id: number) => {
+    fetch(`/api/financials/accounts/${id}/sepa`)
+      .then(res => res.json())
+      .then(data => setSepaCache(prev => ({ ...prev, [id]: data })))
+      .catch(() => {});
   };
 
   // 帳戶載入後，預抓各股票的未確認告警（列上徽章用）
@@ -886,7 +921,7 @@ function App() {
                         <div className="v1-mrow-head" onClick={() => {
                           const next = expanded ? null : acc.id;
                           setExpandedAccId(next);
-                          if (next != null && acc.subtype === 'stock' && acc.ticker) { fetchRealized(acc.id); fetchAlerts(acc.id); }
+                          if (next != null && acc.subtype === 'stock' && acc.ticker) { fetchRealized(acc.id); fetchAlerts(acc.id); fetchSepa(acc.id); }
                         }}>
                           <div className="v1-ic" style={{ background: st.bg }}>{st.icon}</div>
                           <div className="v1-mrow-info">
@@ -943,13 +978,43 @@ function App() {
                                     {alertsCache[acc.id].alerts.filter(a => !a.acknowledged).map(a => (
                                       <div key={a.id} className={`v1-alert-row ${a.alert_type}`}>
                                         <span>
-                                          {a.alert_type === 'stop_loss' ? '⚠️ 跌破停損' : '🎯 突破目標'}
+                                          {(ALERT_LABEL[a.alert_type]?.icon || '🔔') + ' ' + (ALERT_LABEL[a.alert_type]?.text || a.alert_type)}
                                           {' '}${Number(a.threshold).toLocaleString('zh-TW')}
                                           （觸發價 ${Number(a.price_at_trigger).toLocaleString('zh-TW')}）
                                         </span>
                                         <button className="btn btn-secondary v1-alert-ack" onClick={() => handleAcknowledgeAlert(acc.id, a.id)}>知道了</button>
                                       </div>
                                     ))}
+                                  </div>
+                                )}
+                                {sepaCache[acc.id] && sepaCache[acc.id].checked && (
+                                  <div className="v1-sepa">
+                                    <div className="v1-stock-row total">
+                                      <span className="v1-label">📋 SEPA 體檢（{sepaCache[acc.id].check_date?.slice(0, 10)}）</span>
+                                      <span className={`v1-sepa-score ${sepaCache[acc.id].score >= 7 ? 'pnl-up' : sepaCache[acc.id].score >= 5 ? 'v1-sepa-mid' : 'pnl-down'}`}>
+                                        {sepaCache[acc.id].score}/8
+                                      </span>
+                                    </div>
+                                    <div className="v1-sepa-grid">
+                                      {SEPA_TEMPLATE_LABELS.map((label, i) => {
+                                        const key = `t${i + 1}`;
+                                        const val = sepaCache[acc.id].template[key];
+                                        return (
+                                          <div key={key} className="v1-sepa-item">
+                                            <span className={val === true ? 'pnl-up' : val === false ? 'pnl-down' : ''}>
+                                              {val === true ? '✅' : val === false ? '❌' : '—'}
+                                            </span>
+                                            <span>{label}</span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                    <div className="v1-sepa-ma">
+                                      <span>50日 ${fmtNum(sepaCache[acc.id].ma50)}</span>
+                                      <span>150日 ${fmtNum(sepaCache[acc.id].ma150)}</span>
+                                      <span>200日 ${fmtNum(sepaCache[acc.id].ma200)}</span>
+                                      <span>10週 ${fmtNum(sepaCache[acc.id].wma10)}</span>
+                                    </div>
                                   </div>
                                 )}
                                 {realizedCache[acc.id] && realizedCache[acc.id].count > 0 && (

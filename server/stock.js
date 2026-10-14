@@ -129,4 +129,4 @@ async function updateStockPrices() {
   return updated;
 }
 
-module.exports = { fetchYahooQuote, fetchFxRate, updateStockPrices };
+module.exports = { fetchYahooQuote, fetchFxRate, updateStockPrices, getJsonWithRetry, YAHOO_HOSTS, YAHOO_UA };

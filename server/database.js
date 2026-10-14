@@ -116,6 +116,26 @@ const initDb = async () => {
       )
     `);
 
+    // SEPA daily trend-template checks (每日體檢)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS fin_sepa_checks (
+        id SERIAL PRIMARY KEY,
+        account_id INTEGER REFERENCES fin_accounts(id) ON DELETE CASCADE,
+        check_date DATE NOT NULL,
+        close NUMERIC(15, 4),
+        ma50 NUMERIC(15, 4),
+        ma150 NUMERIC(15, 4),
+        ma200 NUMERIC(15, 4),
+        wma10 NUMERIC(15, 4),
+        high_52w NUMERIC(15, 4),
+        low_52w NUMERIC(15, 4),
+        rs_proxy NUMERIC(8, 4),
+        template JSONB NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (account_id, check_date)
+      )
+    `);
+
     // Seed default accounts if empty
     const { rows } = await pool.query('SELECT COUNT(*) FROM fin_accounts');
     if (parseInt(rows[0].count, 10) === 0) {

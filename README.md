@@ -25,6 +25,7 @@
 - **加碼買進**：輸入加碼股數與買進單價，後端自動重算加權平均成本；送出前即時預覽加碼後均價與總股數
 - **賣出記錄**：輸入賣出股數與賣出單價，自動扣減股數並記錄實現損益；點開帳戶可見累計已實現損益與每筆賣出明細
 - **股價提醒**：每檔股票可設停損價／目標價（股票計價幣別）；每小時更新時採邊緣觸發檢查，穿越即產生告警，帳戶列顯示 ⚠️ 徽章，點開可確認（知道了）
+- **SEPA 每日體檢**：每天 14:00（Phoenix 時間，台美股皆收盤後）自動抓一年日線，計算 50/150/200 日線、10 週線、52 週高低，逐條檢查 8 條趨勢模板（第 8 條以相對大盤強弱為參考值）；規則告警（收盤破 50 日線／跌破 10 週線／跌破 200 日線／距成本 -7%／過熱 +20%）採邊緣觸發寫入告警系統
 
 ### 🧾 近期待繳（demands）
 - 未來現金需求的新增／刪除，含金額與到期日
@@ -99,6 +100,8 @@ npm run build   # tsc + vite build，產出 dist/
 | GET | `/api/financials/accounts/:id/realized` | 單一帳戶實現損益明細與累計 |
 | GET | `/api/financials/accounts/:id/alerts` | 單一帳戶股價告警記錄 |
 | POST | `/api/financials/alerts/:id/acknowledge` | 確認（已讀）一則股價告警 |
+| POST | `/api/financials/sepa/check` | 手動觸發 SEPA 每日體檢 |
+| GET | `/api/financials/accounts/:id/sepa` | 單一帳戶最新 SEPA 體檢結果 |
 | POST | `/api/financials/stocks/refresh` | 手動觸發股票現價更新 |
 | GET | `/api/financials/accounts/:id/history` | 單一帳戶水位歷史 |
 | GET | `/api/financials/history/all` | 全帳戶水位歷史（走勢圖用）|

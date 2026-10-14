@@ -4,6 +4,7 @@ const cheerio = require('cheerio');
 const cron = require('node-cron');
 const { analyzeContentWithGemini } = require('./gemini');
 const { updateStockPrices } = require('./stock');
+const { runSepaCheck } = require('./sepa');
 
 const activeTasks = {};
 async function scrapeUrl(url) {
@@ -122,4 +123,18 @@ function startStockScheduler() {
   console.log('[SCHEDULER] Hourly Yahoo stock price refresh mounted (0 * * * *)');
 }
 
-module.exports = { startScheduler, startStockScheduler, performCrawl, schedulePage, unschedulePage };
+// Daily SEPA trend-template check (14:00 Phoenix = after TW close 13:30 Taipei and US close 13:00 Phoenix)
+function startSepaScheduler() {
+  cron.schedule('0 14 * * *', async () => {
+    try {
+      await runSepaCheck();
+    } catch (err) {
+      console.error('[SEPA] Scheduled check error:', err.message);
+    }
+  }, {
+    timezone: process.env.TZ || 'America/Phoenix'
+  });
+  console.log('[SCHEDULER] Daily SEPA check mounted (0 14 * * *)');
+}
+
+module.exports = { startScheduler, startStockScheduler, startSepaScheduler, performCrawl, schedulePage, unschedulePage };

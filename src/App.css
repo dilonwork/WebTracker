@@ -1205,3 +1205,15 @@ body {
 .v1-alert-row.stop_loss { background: rgba(248, 113, 113, 0.12); border: 1px solid rgba(248, 113, 113, 0.4); color: #fca5a5; }
 .v1-alert-row.target { background: rgba(52, 211, 153, 0.12); border: 1px solid rgba(52, 211, 153, 0.4); color: #6ee7b7; }
 .v1-alert-ack { padding: 6px 12px; font-size: 13px; white-space: nowrap; }
+
+/* SEPA check */
+.v1-sepa { margin: 8px 0; }
+.v1-sepa-score { font-size: 20px; font-weight: 800; }
+.v1-sepa-mid { color: #fbbf24; font-weight: 700; }
+.v1-sepa-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; margin: 8px 0; }
+.v1-sepa-item { display: flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--text-secondary); padding: 4px 0; }
+.v1-sepa-ma { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--text-secondary); margin-top: 6px; }
+.v1-alert-row.sepa_50ma_break, .v1-alert-row.sepa_10w_break { background: rgba(248, 113, 113, 0.12); border: 1px solid rgba(248, 113, 113, 0.4); color: #fca5a5; }
+.v1-alert-row.sepa_200ma_break { background: rgba(248, 113, 113, 0.18); border: 1px solid rgba(248, 113, 113, 0.6); color: #fca5a5; }
+.v1-alert-row.sepa_stop_7pct { background: rgba(251, 191, 36, 0.10); border: 1px solid rgba(251, 191, 36, 0.4); color: #fcd34d; }
+.v1-alert-row.sepa_overheat { background: rgba(52, 211, 153, 0.12); border: 1px solid rgba(52, 211, 153, 0.4); color: #6ee7b7; }

@@ -4,7 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const db = require('./database');
 const cron = require('node-cron');
-const { startScheduler, startStockScheduler, performCrawl, schedulePage, unschedulePage } = require('./scheduler');
+const { startScheduler, startStockScheduler, startSepaScheduler, performCrawl, schedulePage, unschedulePage } = require('./scheduler');
 
 const app = express();
 app.use(cors());
@@ -13,6 +13,7 @@ app.use(express.json());
 // Start background task
 startScheduler();
 startStockScheduler();
+startSepaScheduler();
 
 // API: Get all pages
 app.get('/api/pages', async (req, res) => {
@@ -344,6 +345,44 @@ app.post('/api/financials/alerts/:id/acknowledge', async (req, res) => {
     );
     if (rowCount === 0) return res.status(404).json({ error: 'Alert not found' });
     res.json({ id, acknowledged: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4.60. Manually trigger SEPA daily check
+app.post('/api/financials/sepa/check', async (req, res) => {
+  try {
+    const { runSepaCheck } = require('./sepa');
+    const checked = await runSepaCheck();
+    res.json({ success: true, checked });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4.61. Latest SEPA check for a stock account
+app.get('/api/financials/accounts/:id/sepa', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { rows } = await db.query(
+      `SELECT check_date, close, ma50, ma150, ma200, wma10, high_52w, low_52w, rs_proxy, template
+       FROM fin_sepa_checks WHERE account_id = $1 ORDER BY check_date DESC LIMIT 1`,
+      [id]
+    );
+    if (rows.length === 0) return res.json({ checked: false });
+    const r = rows[0];
+    const template = typeof r.template === 'string' ? JSON.parse(r.template) : r.template;
+    const score = ['t1','t2','t3','t4','t5','t6','t7','t8'].filter(k => template[k] === true).length;
+    res.json({
+      checked: true,
+      check_date: r.check_date,
+      close: Number(r.close), ma50: Number(r.ma50), ma150: Number(r.ma150),
+      ma200: Number(r.ma200), wma10: Number(r.wma10),
+      high_52w: Number(r.high_52w), low_52w: Number(r.low_52w),
+      rs_proxy: r.rs_proxy == null ? null : Number(r.rs_proxy),
+      template, score
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
