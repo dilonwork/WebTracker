@@ -348,6 +348,26 @@ function App() {
 
   const fmtNum = (v: any) => (v == null ? '—' : '$' + Number(v).toLocaleString('zh-TW'));
 
+  // SEPA 行動建議：根據最新體檢數據算出當前最重要的行動（常駐狀態，非一次性告警）
+  const sepaVerdict = (sepa: any, costPrice: number): { icon: string; text: string; tone: string } | null => {
+    if (!sepa || !sepa.checked) return null;
+    const c = Number(sepa.close);
+    const ma50 = sepa.ma50 == null ? null : Number(sepa.ma50);
+    const ma200 = sepa.ma200 == null ? null : Number(sepa.ma200);
+    const wma10 = sepa.wma10 == null ? null : Number(sepa.wma10);
+    const score = Number(sepa.score || 0);
+    if (ma200 && c <= ma200) return { icon: '⛔', text: '跌破 200 日線：SEPA 出清訊號', tone: 'danger' };
+    if (wma10 && c <= wma10) return { icon: '⚠️', text: '跌破 10 週線：第一級減半訊號', tone: 'warn' };
+    if (ma50 && c <= ma50) return { icon: '⚠️', text: '收盤破 50 日線：出場訊號', tone: 'warn' };
+    if (costPrice > 0 && (c - costPrice) / costPrice <= -0.07)
+      return { icon: '🛑', text: `距成本 ${(((c - costPrice) / costPrice) * 100).toFixed(1)}%：停損`, tone: 'danger' };
+    if (ma50 && (c - ma50) / ma50 >= 0.20)
+      return { icon: '🔥', text: `過熱（距 50 日線 +${(((c - ma50) / ma50) * 100).toFixed(0)}%）：考慮分批獲利`, tone: 'hot' };
+    if (score <= 4) return { icon: '👀', text: `模板轉弱（${score}/8）：提高警覺，不加碼`, tone: 'warn' };
+    if (score >= 7) return { icon: '✅', text: `模板完整（${score}/8）：續抱`, tone: 'good' };
+    return { icon: '➖', text: `模板部分轉弱（${score}/8）：觀察`, tone: 'neutral' };
+  };
+
   const dirtyCount = accounts.filter(a => {
     // 自動股票由每小時排程維護水位，不列入手動未儲存
     if (a.subtype === 'stock' && a.ticker) return false;
@@ -1069,6 +1089,14 @@ function App() {
                                 )}
                                 {sepaCache[acc.id] && sepaCache[acc.id].checked ? (
                                   <div className="v1-sepa">
+                                    {(() => {
+                                      const v = sepaVerdict(sepaCache[acc.id], Number(acc.cost_price || 0));
+                                      return v ? (
+                                        <div className={`v1-sepa-verdict ${v.tone}`}>
+                                          <span>{v.icon} {v.text}</span>
+                                        </div>
+                                      ) : null;
+                                    })()}
                                     <div className="v1-stock-row total">
                                       <span className="v1-label">📋 SEPA 體檢（{sepaCache[acc.id].check_date?.slice(0, 10)}）</span>
                                       <span className={`v1-sepa-score ${sepaCache[acc.id].score >= 7 ? 'pnl-up' : sepaCache[acc.id].score >= 5 ? 'v1-sepa-mid' : 'pnl-down'}`}>
