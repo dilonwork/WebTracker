@@ -412,11 +412,29 @@ function App() {
   };
 
   // SEPA 每日體檢
+  const [sepaCheckingId, setSepaCheckingId] = useState<number | null>(null);
   const fetchSepa = (id: number) => {
     fetch(`/api/financials/accounts/${id}/sepa`)
       .then(res => res.json())
       .then(data => setSepaCache(prev => ({ ...prev, [id]: data })))
       .catch(() => {});
+  };
+  const handleSepaCheckNow = async (acc: FinancialAccount) => {
+    setSepaCheckingId(acc.id);
+    try {
+      const res = await fetch('/api/financials/sepa/check', { method: 'POST' });
+      if (res.ok) {
+        fetchSepa(acc.id);
+        fetchAlerts(acc.id);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert('體檢失敗：' + (data.error || res.statusText));
+      }
+    } catch (err: any) {
+      alert('體檢請求失敗: ' + err.message);
+    } finally {
+      setSepaCheckingId(null);
+    }
   };
 
   // 帳戶載入後，預抓各股票的未確認告警（列上徽章用）
@@ -987,7 +1005,7 @@ function App() {
                                     ))}
                                   </div>
                                 )}
-                                {sepaCache[acc.id] && sepaCache[acc.id].checked && (
+                                {sepaCache[acc.id] && sepaCache[acc.id].checked ? (
                                   <div className="v1-sepa">
                                     <div className="v1-stock-row total">
                                       <span className="v1-label">📋 SEPA 體檢（{sepaCache[acc.id].check_date?.slice(0, 10)}）</span>
@@ -1015,6 +1033,17 @@ function App() {
                                       <span>200日 ${fmtNum(sepaCache[acc.id].ma200)}</span>
                                       <span>10週 ${fmtNum(sepaCache[acc.id].wma10)}</span>
                                     </div>
+                                  </div>
+                                ) : (
+                                  <div className="v1-sepa-empty">
+                                    <span className="v1-label">📋 尚未執行 SEPA 體檢</span>
+                                    <button
+                                      className="btn btn-secondary"
+                                      disabled={sepaCheckingId === acc.id}
+                                      onClick={() => handleSepaCheckNow(acc)}
+                                    >
+                                      {sepaCheckingId === acc.id ? '體檢中…' : '📋 立即體檢'}
+                                    </button>
                                   </div>
                                 )}
                                 {realizedCache[acc.id] && realizedCache[acc.id].count > 0 && (
