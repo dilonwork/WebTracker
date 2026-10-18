@@ -104,6 +104,7 @@ const initDb = async () => {
     // Price alert thresholds per stock account (股價提醒：以股票計價幣別為準)
     await pool.query(`ALTER TABLE fin_accounts ADD COLUMN IF NOT EXISTS stop_loss NUMERIC(15, 4) DEFAULT 0`);
     await pool.query(`ALTER TABLE fin_accounts ADD COLUMN IF NOT EXISTS target_price NUMERIC(15, 4) DEFAULT 0`);
+    await pool.query(`ALTER TABLE fin_accounts ADD COLUMN IF NOT EXISTS tier TEXT DEFAULT ''`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS fin_price_alerts (
         id SERIAL PRIMARY KEY,

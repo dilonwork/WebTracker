@@ -155,14 +155,14 @@ app.get('/api/financials/accounts', async (req, res) => {
 // 2. Add a new account
 app.post('/api/financials/accounts', async (req, res) => {
   try {
-    const { name, institution, type, subtype, balance, currency, monthly_payment, interest_rate, ticker, shares, cost_price, stop_loss, target_price } = req.body;
+    const { name, institution, type, subtype, balance, currency, monthly_payment, interest_rate, ticker, shares, cost_price, stop_loss, target_price, tier } = req.body;
     if (!name || !type || !subtype) {
       return res.status(400).json({ error: "Name, type, and subtype are required." });
     }
     const { rows } = await db.query(
-      `INSERT INTO fin_accounts (name, institution, type, subtype, balance, currency, monthly_payment, interest_rate, ticker, shares, cost_price, stop_loss, target_price)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
-      [name, institution || '', type, subtype, balance || 0, currency || 'TWD', monthly_payment || 0, interest_rate || 0, ticker || '', shares || 0, cost_price || 0, stop_loss || 0, target_price || 0]
+      `INSERT INTO fin_accounts (name, institution, type, subtype, balance, currency, monthly_payment, interest_rate, ticker, shares, cost_price, stop_loss, target_price, tier)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
+      [name, institution || '', type, subtype, balance || 0, currency || 'TWD', monthly_payment || 0, interest_rate || 0, ticker || '', shares || 0, cost_price || 0, stop_loss || 0, target_price || 0, tier || '']
     );
     
     // Record initial history
@@ -181,12 +181,12 @@ app.post('/api/financials/accounts', async (req, res) => {
 app.put('/api/financials/accounts/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const { name, institution, type, subtype, balance, currency, monthly_payment, interest_rate, ticker, shares, cost_price, stop_loss, target_price } = req.body;
+    const { name, institution, type, subtype, balance, currency, monthly_payment, interest_rate, ticker, shares, cost_price, stop_loss, target_price, tier } = req.body;
     const { rowCount } = await db.query(
       `UPDATE fin_accounts 
-       SET name = $1, institution = $2, type = $3, subtype = $4, balance = $5, currency = $6, monthly_payment = $7, interest_rate = $8, ticker = $9, shares = $10, cost_price = $11, stop_loss = $12, target_price = $13
-       WHERE id = $14`,
-      [name, institution, type, subtype, balance, currency, monthly_payment, interest_rate, ticker || '', shares || 0, cost_price || 0, stop_loss || 0, target_price || 0, id]
+       SET name = $1, institution = $2, type = $3, subtype = $4, balance = $5, currency = $6, monthly_payment = $7, interest_rate = $8, ticker = $9, shares = $10, cost_price = $11, stop_loss = $12, target_price = $13, tier = $14
+       WHERE id = $15`,
+      [name, institution, type, subtype, balance, currency, monthly_payment, interest_rate, ticker || '', shares || 0, cost_price || 0, stop_loss || 0, target_price || 0, tier || '', id]
     );
     if (rowCount === 0) return res.status(404).json({ error: "Account not found" });
 

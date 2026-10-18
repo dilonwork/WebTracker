@@ -40,6 +40,7 @@ interface FinancialAccount {
   last_price: number;
   stop_loss: number;
   target_price: number;
+  tier: string;
   updated_at: string;
 }
 
@@ -107,6 +108,7 @@ function App() {
   const [accCostPrice, setAccCostPrice] = useState('');
   const [accStopLoss, setAccStopLoss] = useState('');
   const [accTargetPrice, setAccTargetPrice] = useState('');
+  const [accTier, setAccTier] = useState('');
   // 股價提醒
   const [alertsCache, setAlertsCache] = useState<Record<number, { unacknowledged: number; alerts: any[] }>>({});
   // SEPA 每日體檢
@@ -348,8 +350,9 @@ function App() {
 
   const fmtNum = (v: any) => (v == null ? '—' : '$' + Number(v).toLocaleString('zh-TW'));
 
-  // SEPA 行動建議：根據最新體檢數據算出當前最重要的行動（常駐狀態，非一次性告警）
-  const sepaVerdict = (sepa: any, costPrice: number): { icon: string; text: string; tone: string } | null => {
+  // SEPA 行動建議：根據最新體檢數據＋持股分級算出當前最重要的行動（常駐狀態，非一次性告警）
+  const TIER_LABEL: Record<string, string> = { t1: '第一級', t2: '第二級', trial: '試單' };
+  const sepaVerdict = (sepa: any, costPrice: number, tier: string): { icon: string; text: string; tone: string } | null => {
     if (!sepa || !sepa.checked) return null;
     const c = Number(sepa.close);
     const ma50 = sepa.ma50 == null ? null : Number(sepa.ma50);
@@ -357,8 +360,12 @@ function App() {
     const wma10 = sepa.wma10 == null ? null : Number(sepa.wma10);
     const score = Number(sepa.score || 0);
     if (ma200 && c <= ma200) return { icon: '⛔', text: '跌破 200 日線：SEPA 出清訊號', tone: 'danger' };
-    if (wma10 && c <= wma10) return { icon: '⚠️', text: '跌破 10 週線：第一級減半訊號', tone: 'warn' };
-    if (ma50 && c <= ma50) return { icon: '⚠️', text: '收盤破 50 日線：出場訊號', tone: 'warn' };
+    if (tier === 't1' && wma10 && c <= wma10) return { icon: '⚠️', text: '跌破 10 週線：第一級減半訊號', tone: 'warn' };
+    if (ma50 && c <= ma50)
+      return (tier === 't2' || tier === 'trial')
+        ? { icon: '⚠️', text: '收盤破 50 日線：出場訊號', tone: 'warn' }
+        : { icon: '⚠️', text: '收盤破 50 日線：轉弱', tone: 'warn' };
+    if (wma10 && c <= wma10) return { icon: '⚠️', text: '跌破 10 週線：動能轉弱', tone: 'warn' };
     if (costPrice > 0 && (c - costPrice) / costPrice <= -0.07)
       return { icon: '🛑', text: `距成本 ${(((c - costPrice) / costPrice) * 100).toFixed(1)}%：停損`, tone: 'danger' };
     if (ma50 && (c - ma50) / ma50 >= 0.20)
@@ -565,6 +572,7 @@ function App() {
       setAccCostPrice(acc.cost_price ? acc.cost_price.toString() : '');
       setAccStopLoss(acc.stop_loss ? acc.stop_loss.toString() : '');
       setAccTargetPrice(acc.target_price ? acc.target_price.toString() : '');
+      setAccTier(acc.tier || '');
     } else {
       setAccEditingId(null);
       setAccName('');
@@ -580,6 +588,7 @@ function App() {
       setAccCostPrice('');
       setAccStopLoss('');
       setAccTargetPrice('');
+      setAccTier('');
     }
     setIsAccountModalOpen(true);
   };
@@ -598,7 +607,8 @@ function App() {
       shares: Number(accShares) || 0,
       cost_price: Number(accCostPrice) || 0,
       stop_loss: Number(accStopLoss) || 0,
-      target_price: Number(accTargetPrice) || 0
+      target_price: Number(accTargetPrice) || 0,
+      tier: accTier
     };
 
     const method = accEditingId ? 'PUT' : 'POST';
@@ -1090,7 +1100,7 @@ function App() {
                                 {sepaCache[acc.id] && sepaCache[acc.id].checked ? (
                                   <div className="v1-sepa">
                                     {(() => {
-                                      const v = sepaVerdict(sepaCache[acc.id], Number(acc.cost_price || 0));
+                                      const v = sepaVerdict(sepaCache[acc.id], Number(acc.cost_price || 0), acc.tier || '');
                                       return v ? (
                                         <div className={`v1-sepa-verdict ${v.tone}`}>
                                           <span>{v.icon} {v.text}</span>
@@ -1118,10 +1128,10 @@ function App() {
                                       })}
                                     </div>
                                     <div className="v1-sepa-ma">
-                                      <span>50日 ${fmtNum(sepaCache[acc.id].ma50)}</span>
-                                      <span>150日 ${fmtNum(sepaCache[acc.id].ma150)}</span>
-                                      <span>200日 ${fmtNum(sepaCache[acc.id].ma200)}</span>
-                                      <span>10週 ${fmtNum(sepaCache[acc.id].wma10)}</span>
+                                      <span>50日 {fmtNum(sepaCache[acc.id].ma50)}</span>
+                                      <span>150日 {fmtNum(sepaCache[acc.id].ma150)}</span>
+                                      <span>200日 {fmtNum(sepaCache[acc.id].ma200)}</span>
+                                      <span>10週 {fmtNum(sepaCache[acc.id].wma10)}</span>
                                     </div>
                                   </div>
                                 ) : (
@@ -1721,6 +1731,15 @@ function App() {
                       onChange={e => setAccTargetPrice(e.target.value)} 
                       placeholder="例如：2800，留空不設"
                     />
+                  </div>
+                  <div className="form-group">
+                    <label>持股分級（SEPA）</label>
+                    <select className="url-input select-input" value={accTier} onChange={e => setAccTier(e.target.value)}>
+                      <option value="">未設定</option>
+                      <option value="t1">第一級（最高確信度）</option>
+                      <option value="t2">第二級（領導股）</option>
+                      <option value="trial">試單級</option>
+                    </select>
                   </div>
                   <p style={{ gridColumn: '1 / -1', fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>
                     💡 成本手動設定；現價每小時自動從 Yahoo Finance 抓取，市值＝現價 × 股數。設停損／目標價後，每小時檢查穿越即告警。
