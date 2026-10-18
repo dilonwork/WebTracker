@@ -1221,3 +1221,14 @@ body {
 /* SEPA empty state */
 .v1-sepa-empty { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 8px 0; padding: 10px 2px; }
 .v1-sepa-empty .btn { white-space: nowrap; }
+
+/* asset subtype filter (linked to 總資產 card) */
+.v1-stat.active { border-color: var(--accent-primary); background: rgba(99,102,241,.12); }
+.v1-breakdown { border-radius: 16px; padding: 6px 14px; margin: 10px 0 2px; }
+.v1-breakdown-row { display: flex; justify-content: space-between; align-items: center; padding: 11px 2px; font-size: 14px; border-bottom: 1px solid rgba(255,255,255,.06); cursor: pointer; }
+.v1-breakdown-row:last-child { border-bottom: none; }
+.v1-breakdown-row.sel { color: #a5b4fc; font-weight: 700; }
+.v1-breakdown-amt { font-weight: 700; font-size: 15px; }
+.v1-filter-tag { font-size: 12px; color: #a5b4fc; font-weight: 400; }
+.v1-sepa-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: rgba(16,185,129,.08); border: 1px solid rgba(16,185,129,.3); border-radius: 14px; padding: 10px 14px; margin-bottom: 10px; font-size: 14px; }
+.v1-sepa-bar .btn { white-space: nowrap; }

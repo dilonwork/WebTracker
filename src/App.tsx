@@ -213,6 +213,36 @@ function App() {
   const totalLiabilities = accounts.filter(a => a.type === 'liability').reduce((sum, a) => sum + Number(a.balance), 0);
   const netWorth = totalAssets - totalLiabilities;
 
+  // 資產類型篩選（點總資產卡展開分組，點類型篩選）
+  const [assetSubtypeFilter, setAssetSubtypeFilter] = useState<string | null>(null);
+  const [showAssetBreakdown, setShowAssetBreakdown] = useState(false);
+  const [isSepaCheckingAll, setIsSepaCheckingAll] = useState(false);
+  const ASSET_SUBTYPE_ORDER = ['cash', 'deposit', 'stock', 'currency'];
+  const assetSubtypeTotals = ASSET_SUBTYPE_ORDER
+    .map(st => {
+      const list = accounts.filter(a => a.type === 'asset' && a.subtype === st);
+      return { subtype: st, total: list.reduce((s, a) => s + Number(a.balance), 0), count: list.length };
+    })
+    .filter(x => x.count > 0);
+  const handleSepaCheckAll = async () => {
+    setIsSepaCheckingAll(true);
+    try {
+      const res = await fetch('/api/financials/sepa/check', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        accounts.forEach(a => { if (a.subtype === 'stock' && a.ticker) { fetchAlerts(a.id); fetchSepa(a.id); } });
+        alert(`體檢完成，共檢查 ${data.checked ?? ''} 個股票帳戶`.trim());
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert('體檢失敗：' + (data.error || res.statusText));
+      }
+    } catch (err: any) {
+      alert('體檢請求失敗: ' + err.message);
+    } finally {
+      setIsSepaCheckingAll(false);
+    }
+  };
+
   const cashAssets = accounts.filter(a => a.type === 'asset' && a.subtype === 'cash').reduce((sum, a) => sum + Number(a.balance), 0);
   const depositAssets = accounts.filter(a => a.type === 'asset' && a.subtype === 'deposit').reduce((sum, a) => sum + Number(a.balance), 0);
   const stockAssets = accounts.filter(a => a.type === 'asset' && a.subtype === 'stock').reduce((sum, a) => sum + Number(a.balance), 0);
@@ -892,11 +922,15 @@ function App() {
               <p>點選帳戶展開，快速調整水位餘額。</p>
             </div>
 
-            {/* 總覽小卡 */}
+            {/* 總覽小卡（點總資產展開類型分組） */}
             <div className="v1-stats">
-              <div className="v1-stat glass-panel">
+              <div
+                className={`v1-stat glass-panel${showAssetBreakdown ? ' active' : ''}`}
+                onClick={() => setShowAssetBreakdown(v => !v)}
+              >
                 <span className="v1-label">總資產</span>
                 <div className="v1-stat-v num" style={{ color: '#34d399' }}>${totalAssets.toLocaleString('zh-TW')}</div>
+                <div className="v1-stat-s">{showAssetBreakdown ? '收合分組 ▴' : '點我展開分組 ▾'}</div>
               </div>
               <div className="v1-stat glass-panel">
                 <span className="v1-label">總負債</span>
@@ -907,6 +941,22 @@ function App() {
                 <div className="v1-stat-v num">${netWorth.toLocaleString('zh-TW')}</div>
               </div>
             </div>
+
+            {/* 資產類型分組（點類型篩選，再點取消） */}
+            {showAssetBreakdown && (
+              <div className="v1-breakdown glass-panel">
+                {assetSubtypeTotals.map(({ subtype, total, count }) => (
+                  <div
+                    key={subtype}
+                    className={`v1-breakdown-row${assetSubtypeFilter === subtype ? ' sel' : ''}`}
+                    onClick={() => setAssetSubtypeFilter(f => (f === subtype ? null : subtype))}
+                  >
+                    <span>{ACCT_STYLE[subtype]?.icon} {SUBTYPE_LABEL[subtype] || subtype}（{count}）</span>
+                    <span className="num v1-breakdown-amt">${total.toLocaleString('zh-TW')}</span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }}>
               <button className="btn btn-secondary v1-add-btn" style={{ marginTop: 0, flex: 1 }} onClick={() => handleOpenAccountModal()}>
@@ -919,11 +969,23 @@ function App() {
 
             {/* 資產 / 負債分組 */}
             {([['asset', '💰 資產'], ['liability', '💳 負債']] as const).map(([type, title]) => {
-              const list = accounts.filter(a => a.type === type);
+              const list = accounts.filter(a => a.type === type && (type !== 'asset' || !assetSubtypeFilter || a.subtype === assetSubtypeFilter));
               if (list.length === 0) return null;
               return (
                 <div className="v1-sec" key={type}>
-                  <div className="v1-sec-h"><h3>{title}（{list.length}）</h3></div>
+                  <div className="v1-sec-h">
+                    <h3>{title}（{list.length}）{type === 'asset' && assetSubtypeFilter && (
+                      <span className="v1-filter-tag"> · 篩選：{SUBTYPE_LABEL[assetSubtypeFilter]}</span>
+                    )}</h3>
+                  </div>
+                  {type === 'asset' && assetSubtypeFilter === 'stock' && (
+                    <div className="v1-sepa-bar">
+                      <span>📋 已選 {list.length} 檔股票</span>
+                      <button className="btn btn-primary" disabled={isSepaCheckingAll} onClick={handleSepaCheckAll}>
+                        {isSepaCheckingAll ? '體檢中…' : '📋 全部體檢'}
+                      </button>
+                    </div>
+                  )}
                   {list.map(acc => {
                     const st = ACCT_STYLE[acc.subtype] || ACCT_STYLE.cash;
                     const cur = editBalances[acc.id] !== undefined ? editBalances[acc.id] : acc.balance;
