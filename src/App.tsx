@@ -988,6 +988,53 @@ function App() {
               </div>
             )}
 
+            {/* 分級部位總覽 */}
+            {(() => {
+              const stockAccs = accounts.filter(a => a.type === 'asset' && a.subtype === 'stock');
+              if (stockAccs.length === 0) return null;
+              const sumOf = (list: FinancialAccount[]) => list.reduce((s, a) => s + Number(a.balance), 0);
+              const pctOf = (v: number) => (totalAssets > 0 ? (v / totalAssets) * 100 : 0);
+              const cashList = accounts.filter(a => a.type === 'asset' && a.subtype === 'cash');
+              const rows: { key: string; label: string; list: FinancialAccount[]; color: string; cap?: number; capLabel?: string; note?: string; noteWarn?: boolean }[] = [
+                { key: 't1', label: '第一級', list: stockAccs.filter(a => a.tier === 't1'), color: '#6366f1', cap: 70, capLabel: '上限 70%' },
+                { key: 't2', label: '第二級', list: stockAccs.filter(a => a.tier === 't2'), color: '#10b981' },
+                { key: 'trial', label: '試單', list: stockAccs.filter(a => a.tier === 'trial'), color: '#38bdf8' },
+                { key: 'unset', label: '未分級', list: stockAccs.filter(a => !a.tier), color: '#64748b' },
+              ];
+              const t1 = rows[0];
+              const t1Pct = pctOf(sumOf(t1.list));
+              if (t1.list.length > 0 && t1Pct > 70) { t1.note = `⚠️ 超過 70% 上限 ${(t1Pct - 70).toFixed(0)} 個百分點`; t1.noteWarn = true; t1.color = '#f59e0b'; }
+              if (rows[1].list.length === 0) rows[1].note = '尚無部位（目標 20–30%，等領導股買點）';
+              if (rows[2].list.length === 0) rows[2].note = '尚無部位';
+              const cashVal = sumOf(cashList);
+              const cashPct = pctOf(cashVal);
+              const cashNote = cashPct < 10 ? '⚠️ 低於平時 10% 目標' : undefined;
+              const renderRow = (label: string, list: FinancialAccount[], value: number, color: string, cap?: number, capLabel?: string, note?: string, noteWarn?: boolean) => {
+                const pct = pctOf(value);
+                return (
+                  <div className="v1-tier" key={label}>
+                    <div className="v1-tier-head">
+                      <span className="v1-tier-name">{label}{list.length > 0 && <span className="v1-tier-names">{list.map(a => a.name).join('、')}</span>}</span>
+                      <span className="num v1-tier-amt">${Math.round(value).toLocaleString('zh-TW')}<span className="v1-tier-pct">{pct.toFixed(1)}%</span></span>
+                    </div>
+                    <div className={`v1-tier-barwrap${cap ? ' has-cap' : ''}`}>
+                      <div className="v1-tier-bar" style={{ width: `${Math.min(100, pct)}%`, background: color }} />
+                      {cap && <div className="v1-tier-cap" style={{ left: `${cap}%` }} />}
+                      {cap && capLabel && <div className="v1-tier-caplab" style={{ left: `${cap}%` }}>{capLabel}</div>}
+                    </div>
+                    {note && <div className={`v1-tier-note${noteWarn ? ' warn' : ''}`}>{note}</div>}
+                  </div>
+                );
+              };
+              return (
+                <div className="v1-tier-panel glass-panel">
+                  <h3>📊 分級部位總覽</h3>
+                  {rows.map(r => renderRow(r.label, r.list, sumOf(r.list), r.color, r.cap, r.capLabel, r.note, r.noteWarn))}
+                  {renderRow('現金', cashList, cashVal, '#a855f7', 10, '目標 10%', cashNote, !!cashNote)}
+                </div>
+              );
+            })()}
+
             <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }}>
               <button className="btn btn-secondary v1-add-btn" style={{ marginTop: 0, flex: 1 }} onClick={() => handleOpenAccountModal()}>
                 ➕ 新增帳戶部位
