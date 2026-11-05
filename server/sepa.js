@@ -134,14 +134,18 @@ function computeSepa(bars, indexBars) {
   return { price, ma50, ma150, ma200, wma10, high52w, low52w, rsProxy, template: t, score, lastDate };
 }
 
-async function insertRuleAlert(db, accountId, type, threshold, price) {
-  await db.query(
+async function insertRuleAlert(db, acc, type, threshold, price) {
+  const { rows: inserted } = await db.query(
     `INSERT INTO fin_price_alerts (account_id, alert_type, threshold, price_at_trigger)
-     VALUES ($1, $2, $3, $4)`,
-    [accountId, type, threshold, price]
+     VALUES ($1, $2, $3, $4) RETURNING id`,
+    [acc.id, type, threshold, price]
   );
   const label = RULE_ALERT_LABELS[type];
   console.log(`[SEPA] ${label.icon} ${label.text}（現價 ${price}）`);
+  // Agent 診斷＋通知（fire-and-forget，不擋每日體檢；開關在 agent 層把關）
+  const agent = require('./agent');
+  agent.diagnoseAlert(inserted[0].id).catch(e => console.error('[AGENT] diagnose failed:', e.message));
+  agent.notifyExternal({ alert_id: inserted[0].id, account_id: acc.id, ticker: acc.ticker, alert_type: type }).catch(e => console.error('[AGENT] notify failed:', e.message));
 }
 
 // Edge-triggered rule alerts vs previous check.
@@ -153,27 +157,27 @@ async function checkSepaAlerts(db, acc, sepa, prev, quoteCurrency) {
   const pma50 = n(prev.ma50), pma200 = n(prev.ma200), pwma10 = n(prev.wma10);
 
   if (pma50 && pc > pma50 && sepa.ma50 && c <= sepa.ma50) {
-    await insertRuleAlert(db, acc.id, 'sepa_50ma_break', sepa.ma50, c);
+    await insertRuleAlert(db, acc, 'sepa_50ma_break', sepa.ma50, c);
   }
   if (pwma10 && pc > pwma10 && sepa.wma10 && c <= sepa.wma10) {
-    await insertRuleAlert(db, acc.id, 'sepa_10w_break', sepa.wma10, c);
+    await insertRuleAlert(db, acc, 'sepa_10w_break', sepa.wma10, c);
   }
   if (pma200 && pc > pma200 && sepa.ma200 && c <= sepa.ma200) {
-    await insertRuleAlert(db, acc.id, 'sepa_200ma_break', sepa.ma200, c);
+    await insertRuleAlert(db, acc, 'sepa_200ma_break', sepa.ma200, c);
   }
   // -7% 停損：僅報價幣別 == 帳戶幣別時檢查（成本以帳戶幣別計）
   const cost = Number(acc.cost_price || 0);
   if (cost > 0 && quoteCurrency && quoteCurrency === String(acc.currency).toUpperCase()) {
     const prevRet = (pc - cost) / cost, ret = (c - cost) / cost;
     if (prevRet > -0.07 && ret <= -0.07) {
-      await insertRuleAlert(db, acc.id, 'sepa_stop_7pct', cost * 0.93, c);
+      await insertRuleAlert(db, acc, 'sepa_stop_7pct', cost * 0.93, c);
     }
   }
   // 過熱：距 50 日線 +20%
   if (pma50 && sepa.ma50) {
     const prevHot = (pc - pma50) / pma50, hot = (c - sepa.ma50) / sepa.ma50;
     if (prevHot < 0.20 && hot >= 0.20) {
-      await insertRuleAlert(db, acc.id, 'sepa_overheat', sepa.ma50 * 1.2, c);
+      await insertRuleAlert(db, acc, 'sepa_overheat', sepa.ma50 * 1.2, c);
     }
   }
 }

@@ -137,6 +137,51 @@ const initDb = async () => {
       )
     `);
 
+    // Agent 總開關與白名單：五個開關存 DB（改了立即生效，不用重啟）
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS agent_settings (
+        key TEXT PRIMARY KEY,
+        value BOOLEAN NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    const agentDefaults = [
+      ['agent_master', true],
+      ['agent_diagnosis', true],
+      ['agent_health_check', true],
+      ['agent_execution', false],
+      ['agent_notification', false],
+    ];
+    for (const [key, value] of agentDefaults) {
+      await pool.query(
+        `INSERT INTO agent_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING`,
+        [key, value]
+      );
+    }
+
+    // Agent 稽核軌跡：每次 agent 動作一筆
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS agent_audit_log (
+        id SERIAL PRIMARY KEY,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        action_type TEXT NOT NULL,
+        account_id INTEGER,
+        ticker TEXT,
+        page_id INTEGER,
+        alert_id INTEGER,
+        settings_snapshot JSONB,
+        input_snapshot JSONB,
+        model TEXT,
+        output_summary TEXT,
+        approved_by TEXT,
+        result TEXT
+      )
+    `);
+
+    // 告警診斷欄位：診斷文字寫在告警旁邊
+    await pool.query(`ALTER TABLE fin_price_alerts ADD COLUMN IF NOT EXISTS diagnosis TEXT`);
+    await pool.query(`ALTER TABLE fin_price_alerts ADD COLUMN IF NOT EXISTS diagnosis_status TEXT DEFAULT 'pending'`);
+
     // Seed default accounts if empty
     const { rows } = await pool.query('SELECT COUNT(*) FROM fin_accounts');
     if (parseInt(rows[0].count, 10) === 0) {

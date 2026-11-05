@@ -31,6 +31,14 @@
 - **股價提醒**：每檔股票可設停損價／目標價（股票計價幣別）；每小時更新時採邊緣觸發檢查，穿越即產生告警，帳戶列顯示 ⚠️ 徽章，點開可確認（知道了）
 - **SEPA 每日體檢**：每天 14:00（Phoenix 時間，台美股皆收盤後）自動抓一年日線，計算 50/150/200 日線、10 週線、52 週高低，逐條檢查 8 條趨勢模板（第 8 條以相對大盤強弱為參考值）；每檔股票可設**持股分級**（第一級／第二級／試單），體檢區頂部的**行動建議**按分級給出（第一級：10 週線減半／200 日線出清；第二級・試單：破 50 日線出場；未分級：中性描述），為常駐狀態；規則告警（收盤破 50 日線／跌破 10 週線／跌破 200 日線／距成本 -7%／過熱 +20%）採邊緣觸發寫入告警系統；尚未體檢時可按「立即體檢」手動觸發
 
+### 🤖 Agent 總開關與白名單
+- **五個開關**：存在資料庫 `agent_settings`（不是環境變數），改了立即生效，不用重啟——總開關（關掉就壓過全部）、告警診斷（預設開）、每日健檢（預設開，正常不打擾）、批准動作執行（預設關，試點穩定後手動開）、對外通知（預設關，v1 只有站內告警）
+- **告警診斷**：新告警產生時 agent 用 Ollama 寫一段短診斷附在告警旁邊；Ollama 連不上時診斷直接缺件、不編造，SEPA 資料日期對不上觸發日時標示資料過期、不出診斷，執行中開關被關掉時直接中止、不留半成品
+- **每日健檢**：每天 14:30（Phoenix 時間）檢查資料庫、Ollama、SEPA 體檢新鮮度，結果寫入稽核紀錄，正常不打擾，Ollama 異常會明確標示
+- **白名單動作**：人點一次、只做一次——確認告警、重跑 SEPA 體檢、單檔重抓 Yahoo 股價、單頁重跑爬取、產生 advisor 報告；執行開關關著時按鈕停用並講明原因，不排隊偷跑
+- **C 級永遠禁止**：改停損／目標價／門檻、分級、成本、股數，靜音或刪除告警，改網址／prompt／排程，任何交易、改資料庫結構、重啟服務——server 端強制擋下，只寫稽核不執行；但總開關關掉不影響資料層：每小時 Yahoo 抓價、每天 14:00 SEPA 體檢、網站爬取照常寫資料
+- **稽核軌跡**：每次 agent 動作一筆寫入 `agent_audit_log`（鳳凰城時間、動作類型、開關快照、輸入快照、模型、輸出摘要、批准來源、結果），前端只列最新 50 筆
+
 ### 🧾 近期待繳（demands）
 - 未來現金需求的新增／刪除，含金額與到期日
 
@@ -46,7 +54,7 @@
 |---|---|
 | 前端 | React 18 + TypeScript，Vite 5 |
 | 後端 | Node.js + Express |
-| 定時排程 | node-cron（定時爬取、每小時股票現價更新）|
+| 定時排程 | node-cron（定時爬取、每小時股票現價更新、每日 SEPA 體檢與 agent 健檢）|
 | 資料庫 | PostgreSQL（`pg`，啟動時自動建表）|
 | AI 分析 | Ollama（自架 LLM，見 `server/gemini.js`）|
 | 股票現價 | Yahoo Finance 非官方 chart API（含 429/5xx 重試）|
@@ -113,6 +121,15 @@ npm run build   # tsc + vite build，產出 dist/
 | GET | `/api/financials/reports` | AI 診斷報告 |
 | POST | `/api/financials/advisor` | 產生一次 AI 財務診斷 |
 
+### Agent 總開關與白名單
+
+| 方法 | 路徑 | 說明 |
+| ---- | ---- | ---- |
+| GET / PUT | `/api/agent/settings` | 五個開關查詢／更新（只接受已知 key、布林值）|
+| GET | `/api/agent/audit` | 稽核紀錄（最新 50 筆）|
+| POST | `/api/agent/actions` | 執行白名單動作（`type` 限五種；C 級回 403、執行開關關著回 409）|
+| POST | `/api/agent/health-check` | 手動觸發一次每日健檢 |
+
 ## 專案結構
 
 ```
@@ -123,9 +140,11 @@ npm run build   # tsc + vite build，產出 dist/
 ├── server/
 │   ├── index.js       # Express API
 │   ├── database.js    # PostgreSQL 存取（pg，啟動時自動建表）
-│   ├── scheduler.js   # node-cron：定時爬取＋每小時整點股票現價更新
+│   ├── scheduler.js   # node-cron：定時爬取＋每小時整點股票現價更新＋每日 SEPA 體檢與 agent 健檢
 │   ├── stock.js       # Yahoo Finance 現價抓取（含重試）
 │   ├── gemini.js      # Ollama AI 分析呼叫（分析＋財務診斷）
+│   ├── agent.js       # Agent 總開關與白名單：開關、診斷、健檢、通知閘門、白名單執行、C 級阻擋、稽核
+│   ├── agent.test.js  # Agent 單元測試（假 DB＋假 Ollama，`node server/agent.test.js`）
 │   └── migrate.js     # 資料庫遷移
 ├── docs/images/       # 架構圖
 ├── Startup.sh         # 一鍵啟動腳本
@@ -135,5 +154,6 @@ npm run build   # tsc + vite build，產出 dist/
 ## 備註
 
 - AI 分析與 AI 診斷需要能連線到 `.env` 指定的 Ollama 服務；連不上時相關功能會回傳錯誤訊息。
+- Agent 開關預設：總開關開、告警診斷開、每日健檢開、批准動作執行關、對外通知關；開關存資料庫，改了立即生效。執行開關關著時，白名單按鈕（確認告警、重跑 SEPA 體檢、單檔重抓股價、單頁重跑爬取、產生 advisor 報告）會停用並講明原因。
 - 股票現價依賴 Yahoo Finance 非官方 API，程式內建 429 / 5xx 重試，但仍可能受限流影響。
 - 後端預設時區為 `America/Phoenix`（可用 `TZ` 環境變數覆寫）。

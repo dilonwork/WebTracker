@@ -4,7 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const db = require('./database');
 const cron = require('node-cron');
-const { startScheduler, startStockScheduler, startSepaScheduler, performCrawl, schedulePage, unschedulePage } = require('./scheduler');
+const { startScheduler, startStockScheduler, startSepaScheduler, startAgentHealthCheckScheduler, performCrawl, schedulePage, unschedulePage } = require('./scheduler');
 
 const app = express();
 app.use(cors());
@@ -14,6 +14,7 @@ app.use(express.json());
 startScheduler();
 startStockScheduler();
 startSepaScheduler();
+startAgentHealthCheckScheduler();
 
 // API: Get all pages
 app.get('/api/pages', async (req, res) => {
@@ -309,12 +310,12 @@ app.get('/api/financials/accounts/:id/realized', async (req, res) => {
   }
 });
 
-// 4.58. Price alerts for a stock account (股價提醒)
+// 4.58. Price alerts for a stock account (股價提醒，含 agent 診斷）
 app.get('/api/financials/accounts/:id/alerts', async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { rows } = await db.query(
-      `SELECT id, alert_type, threshold, price_at_trigger, triggered_at, acknowledged
+      `SELECT id, alert_type, threshold, price_at_trigger, triggered_at, acknowledged, diagnosis, diagnosis_status
        FROM fin_price_alerts WHERE account_id = $1 ORDER BY triggered_at DESC, id DESC LIMIT 20`,
       [id]
     );
@@ -327,7 +328,9 @@ app.get('/api/financials/accounts/:id/alerts', async (req, res) => {
         threshold: Number(r.threshold),
         price_at_trigger: Number(r.price_at_trigger),
         triggered_at: r.triggered_at,
-        acknowledged: !!r.acknowledged
+        acknowledged: !!r.acknowledged,
+        diagnosis: r.diagnosis || null,
+        diagnosis_status: r.diagnosis_status || 'pending'
       }))
     });
   } catch (err) {
@@ -486,27 +489,75 @@ app.get('/api/financials/reports', async (req, res) => {
 // 10. Trigger Gemini AI Advisor analysis
 app.post('/api/financials/advisor', async (req, res) => {
   try {
-    // 10a. Fetch current financial accounts
-    const { rows: accounts } = await db.query('SELECT * FROM fin_accounts');
-    // 10b. Fetch future cash demands
-    const { rows: demands } = await db.query('SELECT * FROM fin_cash_demands');
-    // 10c. Fetch latest crawled summaries from Web Tracker for market context
-    const { rows: marketContexts } = await db.query(`
-      SELECT r.crawled_at, r.llm_response, p.name, p.url 
-      FROM results r 
-      JOIN pages p ON r.page_id = p.id
-      ORDER BY r.crawled_at DESC
-      LIMIT 10
-    `);
-
-    // 10d. Invoke Gemini
-    const { analyzeFinancialPortfolio } = require('./gemini');
-    const advice = await analyzeFinancialPortfolio({ accounts, demands }, marketContexts);
-
-    // 10e. Log to database
-    await db.query('INSERT INTO fin_ai_reports (analysis) VALUES ($1)', [advice]);
-
+    const { generateAdvisorReport } = require('./agent');
+    const advice = await generateAdvisorReport();
     res.json({ analysis: advice });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// --- Agent 總開關與白名單 API ---
+
+// 11. Get agent settings (five switches)
+app.get('/api/agent/settings', async (req, res) => {
+  try {
+    const { getSettings, SETTING_LABELS } = require('./agent');
+    const settings = await getSettings();
+    res.json({ settings, labels: SETTING_LABELS });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 12. Update agent settings (only known keys, boolean values; effective immediately)
+app.put('/api/agent/settings', async (req, res) => {
+  try {
+    const { updateSettings } = require('./agent');
+    const settings = await updateSettings(db, req.body || {});
+    res.json({ settings });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// 13. Agent audit log (latest 50, same pattern as fin_ai_reports)
+app.get('/api/agent/audit', async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT id, created_at, action_type, account_id, ticker, page_id, alert_id,
+              settings_snapshot, input_snapshot, model, output_summary, approved_by, result
+       FROM agent_audit_log ORDER BY created_at DESC, id DESC LIMIT 50`
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 14. Execute a whitelisted agent action (server-side gate: C 級擋下、執行開關把關）
+app.post('/api/agent/actions', async (req, res) => {
+  try {
+    const { executeAgentAction } = require('./agent');
+    const { type, ...params } = req.body || {};
+    if (!type) return res.status(400).json({ error: 'type is required' });
+    const result = await executeAgentAction(type, params, 'user');
+    if (result.blocked) return res.status(403).json({ error: result.error });
+    if (result.disabled) return res.status(409).json({ error: result.reason });
+    if (result.error) return res.status(500).json({ error: result.error });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 15. Manually trigger agent health check
+app.post('/api/agent/health-check', async (req, res) => {
+  try {
+    const { runHealthCheck } = require('./agent');
+    const result = await runHealthCheck();
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

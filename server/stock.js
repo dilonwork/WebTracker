@@ -103,20 +103,28 @@ async function updateStockPrices() {
         const stopLoss = Number(acc.stop_loss || 0);
         const target = Number(acc.target_price || 0);
         if (stopLoss > 0 && prevPrice > stopLoss && quote.price <= stopLoss) {
-          await db.query(
+          const { rows: inserted } = await db.query(
             `INSERT INTO fin_price_alerts (account_id, alert_type, threshold, price_at_trigger)
-             VALUES ($1, 'stop_loss', $2, $3)`,
+             VALUES ($1, 'stop_loss', $2, $3) RETURNING id`,
             [acc.id, stopLoss, quote.price]
           );
           console.log(`[STOCK] ⚠️ ${acc.ticker} 跌破停損價 ${stopLoss}（現價 ${quote.price}）`);
+          // Agent 診斷＋通知（fire-and-forget，不擋每小時更新；開關在 agent 層把關）
+          const agent = require('./agent');
+          agent.diagnoseAlert(inserted[0].id).catch(e => console.error('[AGENT] diagnose failed:', e.message));
+          agent.notifyExternal({ alert_id: inserted[0].id, account_id: acc.id, ticker: acc.ticker, alert_type: 'stop_loss' }).catch(e => console.error('[AGENT] notify failed:', e.message));
         }
         if (target > 0 && prevPrice < target && quote.price >= target) {
-          await db.query(
+          const { rows: inserted } = await db.query(
             `INSERT INTO fin_price_alerts (account_id, alert_type, threshold, price_at_trigger)
-             VALUES ($1, 'target', $2, $3)`,
+             VALUES ($1, 'target', $2, $3) RETURNING id`,
             [acc.id, target, quote.price]
           );
           console.log(`[STOCK] 🎯 ${acc.ticker} 突破目標價 ${target}（現價 ${quote.price}）`);
+          // Agent 診斷＋通知（fire-and-forget，不擋每小時更新；開關在 agent 層把關）
+          const agent = require('./agent');
+          agent.diagnoseAlert(inserted[0].id).catch(e => console.error('[AGENT] diagnose failed:', e.message));
+          agent.notifyExternal({ alert_id: inserted[0].id, account_id: acc.id, ticker: acc.ticker, alert_type: 'target' }).catch(e => console.error('[AGENT] notify failed:', e.message));
         }
       }
       console.log(`[STOCK] ${acc.ticker}: ${quote.price} x ${acc.shares} = ${balance} ${acc.currency}${recorded ? '' : ' (history skipped, unchanged)'}`);

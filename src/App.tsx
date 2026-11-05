@@ -113,6 +113,11 @@ function App() {
   const [alertsCache, setAlertsCache] = useState<Record<number, { unacknowledged: number; alerts: any[] }>>({});
   // SEPA 每日體檢
   const [sepaCache, setSepaCache] = useState<Record<number, any>>({});
+  // Agent 總開關與白名單
+  const [agentSettings, setAgentSettings] = useState<Record<string, boolean> | null>(null);
+  const [agentAudit, setAgentAudit] = useState<any[]>([]);
+  const [refetchingId, setRefetchingId] = useState<number | null>(null);
+  const [isHealthChecking, setIsHealthChecking] = useState(false);
 
   // Form States - Cash Demands
   const [demandDesc, setDemandDesc] = useState('');
@@ -147,6 +152,8 @@ function App() {
   const fetchPages = () => fetch('/api/pages').then(res => res.json()).then(setPages).catch(console.error);
   const fetchResults = () => fetch('/api/results').then(res => res.json()).then(setResults).catch(console.error);
   const fetchHistoryAll = () => fetch('/api/financials/history/all').then(res => res.json()).then(setHistoryRecords).catch(console.error);
+  const fetchAgentSettings = () => fetch('/api/agent/settings').then(res => res.json()).then(data => setAgentSettings(data.settings || null)).catch(console.error);
+  const fetchAgentAudit = () => fetch('/api/agent/audit').then(res => res.json()).then(setAgentAudit).catch(console.error);
 
   useEffect(() => {
     fetchAccounts();
@@ -155,6 +162,8 @@ function App() {
     fetchPages();
     fetchResults();
     fetchHistoryAll();
+    fetchAgentSettings();
+    fetchAgentAudit();
 
     const interval = setInterval(() => {
       fetchResults();
@@ -229,17 +238,11 @@ function App() {
   const handleSepaCheckAll = async () => {
     setIsSepaCheckingAll(true);
     try {
-      const res = await fetch('/api/financials/sepa/check', { method: 'POST' });
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
+      // 白名單動作：重跑 SEPA 體檢（執行開關關著時按鈕已停用）
+      await handleAgentAction('rerun_sepa_check', {}, (data) => {
         accounts.forEach(a => { if (a.subtype === 'stock' && a.ticker) { fetchAlerts(a.id); fetchSepa(a.id); } });
         alert(`體檢完成，共檢查 ${data.checked ?? ''} 個股票帳戶`.trim());
-      } else {
-        const data = await res.json().catch(() => ({}));
-        alert('體檢失敗：' + (data.error || res.statusText));
-      }
-    } catch (err: any) {
-      alert('體檢請求失敗: ' + err.message);
+      });
     } finally {
       setIsSepaCheckingAll(false);
     }
@@ -290,20 +293,14 @@ function App() {
 
   const sortedDemands = [...demands].sort((a, b) => a.due_date.localeCompare(b.due_date));
 
-  // Trigger AI Advisor
+  // Trigger AI Advisor（白名單動作：產生 advisor 報告）
   const handleGenerateAdvisor = async () => {
     setIsAdvisorLoading(true);
     try {
-      const res = await fetch('/api/financials/advisor', { method: 'POST' });
-      if (res.ok) {
+      await handleAgentAction('generate_advisor_report', {}, async () => {
         await fetchReports();
         alert('AI 理財報告已成功生成！');
-      } else {
-        const errData = await res.json();
-        alert('生成理財報告失敗：' + errData.error);
-      }
-    } catch (err: any) {
-      alert('請求失敗：' + err.message);
+      });
     } finally {
       setIsAdvisorLoading(false);
     }
@@ -334,6 +331,94 @@ function App() {
     sepa_200ma_break: { icon: '⛔', text: '跌破 200 日線（出清訊號）' },
     sepa_stop_7pct: { icon: '🛑', text: '距成本 -7%（停損）' },
     sepa_overheat: { icon: '🔥', text: '過熱（距 50 日線 +20%）' },
+  };
+
+  // Agent 五個開關中文說明（與 server/agent.js SETTING_LABELS 對照）
+  const AGENT_SETTING_META: { key: string; label: string; desc: string }[] = [
+    { key: 'agent_master', label: '總開關', desc: '關掉就壓過下面全部，agent 診斷、健檢、待批准動作全部停' },
+    { key: 'agent_diagnosis', label: '告警診斷', desc: '新告警產生時，用 Ollama 寫一段診斷附在告警旁邊' },
+    { key: 'agent_health_check', label: '每日健檢', desc: '每天檢查資料庫、Ollama、SEPA 體檢新鮮度，正常不打擾' },
+    { key: 'agent_execution', label: '批准動作執行', desc: '人點白名單按鈕才執行動作；關著時按鈕停用並講明原因' },
+    { key: 'agent_notification', label: '對外通知', desc: '告警觸發時對外發送；v1 只有站內告警，推播路徑驗證通了再開' },
+  ];
+
+  // 白名單按鈕停用原因（null 表示可執行；設定未載入前先停用）
+  const agentDisabledReason = !agentSettings
+    ? 'Agent 設定載入中…'
+    : agentSettings.agent_master !== true
+      ? '總開關已關閉'
+      : agentSettings.agent_execution !== true
+        ? '執行開關已關閉，請先開啟「批准動作執行」'
+        : null;
+
+  // Agent 白名單動作（server 端把關：C 級擋下、執行開關把關）
+  const handleAgentAction = async (type: string, params: any, onOk?: (data: any) => void): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/agent/actions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, ...params }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        fetchAgentAudit();
+        if (onOk) onOk(data);
+        return true;
+      }
+      alert(data.error || '執行動作失敗');
+      return false;
+    } catch (err: any) {
+      alert('請求失敗：' + err.message);
+      return false;
+    }
+  };
+
+  const handleToggleAgentSetting = async (key: string, value: boolean) => {
+    try {
+      const res = await fetch('/api/agent/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [key]: value }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAgentSettings(data.settings);
+        fetchAgentAudit();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert('更新開關失敗：' + (data.error || res.statusText));
+      }
+    } catch (err: any) {
+      alert('請求失敗：' + err.message);
+    }
+  };
+
+  const handleAgentHealthCheck = async () => {
+    setIsHealthChecking(true);
+    try {
+      const res = await fetch('/api/agent/health-check', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        fetchAgentAudit();
+        alert(data.summary ? `健檢完成：${data.summary}` : '健檢完成');
+      } else {
+        alert('健檢失敗：' + (data.error || res.statusText));
+      }
+    } catch (err: any) {
+      alert('請求失敗：' + err.message);
+    } finally {
+      setIsHealthChecking(false);
+    }
+  };
+
+  // 單檔重抓 Yahoo 股價（白名單動作）
+  const handleRefetchOneStock = async (acc: FinancialAccount) => {
+    setRefetchingId(acc.id);
+    try {
+      await handleAgentAction('refetch_yahoo_price', { account_id: acc.id }, () => fetchAccounts());
+    } finally {
+      setRefetchingId(null);
+    }
   };
 
   // SEPA 8 條趨勢模板中文標籤
@@ -462,10 +547,8 @@ function App() {
   };
 
   const handleAcknowledgeAlert = async (accountId: number, alertId: number) => {
-    try {
-      const res = await fetch(`/api/financials/alerts/${alertId}/acknowledge`, { method: 'POST' });
-      if (res.ok) fetchAlerts(accountId);
-    } catch { /* ignore */ }
+    // 白名單動作：確認告警（執行開關關著時按鈕已停用）
+    await handleAgentAction('acknowledge_alert', { alert_id: alertId }, () => fetchAlerts(accountId));
   };
 
   // SEPA 每日體檢
@@ -479,16 +562,11 @@ function App() {
   const handleSepaCheckNow = async (acc: FinancialAccount) => {
     setSepaCheckingId(acc.id);
     try {
-      const res = await fetch('/api/financials/sepa/check', { method: 'POST' });
-      if (res.ok) {
+      // 白名單動作：重跑 SEPA 體檢（執行開關關著時按鈕已停用）
+      await handleAgentAction('rerun_sepa_check', {}, () => {
         fetchSepa(acc.id);
         fetchAlerts(acc.id);
-      } else {
-        const data = await res.json().catch(() => ({}));
-        alert('體檢失敗：' + (data.error || res.statusText));
-      }
-    } catch (err: any) {
-      alert('體檢請求失敗: ' + err.message);
+      });
     } finally {
       setSepaCheckingId(null);
     }
@@ -717,9 +795,11 @@ function App() {
   };
 
   const handleManualCrawl = async (id: number) => {
-    await fetch(`/api/pages/${id}/crawl`, { method: 'POST' });
-    alert('爬蟲工作已送出，請稍後查看分析結果！');
-    setTimeout(fetchResults, 3000);
+    // 白名單動作：單頁重跑爬取（執行開關關著時按鈕已停用）
+    await handleAgentAction('rerun_page_crawl', { page_id: id }, () => {
+      alert('爬蟲工作已送出，請稍後查看分析結果！');
+      setTimeout(fetchResults, 3000);
+    });
   };
 
   // Scraper results filter
@@ -907,7 +987,8 @@ function App() {
                 <button
                   className="btn btn-primary btn-spark v1-gen-btn"
                   onClick={handleGenerateAdvisor}
-                  disabled={isAdvisorLoading}
+                  disabled={isAdvisorLoading || !!agentDisabledReason}
+                  title={agentDisabledReason || ''}
                 >
                   {isAdvisorLoading ? '分析中...' : '生成建議'}
                 </button>
@@ -936,6 +1017,54 @@ function App() {
                         </ReactMarkdown>
                       </div>
                     </details>
+                  ))}
+                </details>
+              )}
+            </div>
+
+            {/* Agent 總開關與白名單 */}
+            <div className="v1-sec">
+              <div className="v1-sec-h">
+                <h3>🤖 Agent 總開關與白名單</h3>
+                <button
+                  className="btn btn-secondary"
+                  onClick={handleAgentHealthCheck}
+                  disabled={isHealthChecking}
+                >
+                  {isHealthChecking ? '健檢中…' : '🩺 立即健檢'}
+                </button>
+              </div>
+              {agentSettings ? (
+                <>
+                  {AGENT_SETTING_META.map(m => (
+                    <div key={m.key} className="v1-stock-row">
+                      <span className="v1-label">{m.label}<span className="agent-setting-desc">（{m.desc}）</span></span>
+                      <button
+                        className={`btn ${agentSettings[m.key] ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => handleToggleAgentSetting(m.key, !agentSettings[m.key])}
+                      >
+                        {agentSettings[m.key] ? '開' : '關'}
+                      </button>
+                    </div>
+                  ))}
+                  {agentDisabledReason && (
+                    <p className="no-data-hint">⚠️ 白名單動作已停用：{agentDisabledReason}</p>
+                  )}
+                  <p className="no-data-hint">白名單動作（人點一次、只做一次）：確認告警、重跑 SEPA 體檢、單檔重抓 Yahoo 股價、單頁重跑爬取、產生 advisor 報告。改停損／目標價／分級／成本／股數、靜音或刪除告警、改網址或排程、交易等動作 agent 永遠不做。</p>
+                </>
+              ) : (
+                <p className="no-data-hint">Agent 設定載入中…</p>
+              )}
+              {agentAudit.length > 0 && (
+                <details className="v1-details glass-panel">
+                  <summary>稽核紀錄（最新 {agentAudit.length} 筆）</summary>
+                  {agentAudit.map(log => (
+                    <div key={log.id} className="agent-audit-row">
+                      <span className="num">{formatDateTime(log.created_at)}</span>
+                      <span>{log.action_type}</span>
+                      <span>{log.result}</span>
+                      <span>{log.output_summary}</span>
+                    </div>
                   ))}
                 </details>
               )}
@@ -1058,7 +1187,7 @@ function App() {
                   {type === 'asset' && assetSubtypeFilter === 'stock' && (
                     <div className="v1-sepa-bar">
                       <span>📋 已選 {list.length} 檔股票</span>
-                      <button className="btn btn-primary" disabled={isSepaCheckingAll} onClick={handleSepaCheckAll}>
+                      <button className="btn btn-primary" disabled={isSepaCheckingAll || !!agentDisabledReason} title={agentDisabledReason || ''} onClick={handleSepaCheckAll}>
                         {isSepaCheckingAll ? '體檢中…' : '📋 全部體檢'}
                       </button>
                     </div>
@@ -1121,6 +1250,17 @@ function App() {
                                   </div>
                                 </div>
                                 <p className="v1-auto-note">💡 市值每小時自動從 Yahoo 更新；成本請用 ✏️ 編輯。</p>
+                                <div className="v1-stock-row">
+                                  <span className="v1-label">🔄 現價重抓</span>
+                                  <button
+                                    className="btn btn-secondary"
+                                    disabled={refetchingId === acc.id || !!agentDisabledReason}
+                                    title={agentDisabledReason || ''}
+                                    onClick={() => handleRefetchOneStock(acc)}
+                                  >
+                                    {refetchingId === acc.id ? '重抓中…' : '單檔重抓 Yahoo 股價'}
+                                  </button>
+                                </div>
                                 {(Number(acc.stop_loss) > 0 || Number(acc.target_price) > 0) && (
                                   <div className="v1-stock-row">
                                     <span className="v1-label">🔔 告警設定</span>
@@ -1133,13 +1273,27 @@ function App() {
                                 {alertsCache[acc.id] && alertsCache[acc.id].alerts.filter(a => !a.acknowledged).length > 0 && (
                                   <div className="v1-alerts">
                                     {alertsCache[acc.id].alerts.filter(a => !a.acknowledged).map(a => (
-                                      <div key={a.id} className={`v1-alert-row ${a.alert_type}`}>
-                                        <span>
-                                          {(ALERT_LABEL[a.alert_type]?.icon || '🔔') + ' ' + (ALERT_LABEL[a.alert_type]?.text || a.alert_type)}
-                                          {' '}${Number(a.threshold).toLocaleString('zh-TW')}
-                                          （觸發價 ${Number(a.price_at_trigger).toLocaleString('zh-TW')}）
-                                        </span>
-                                        <button className="btn btn-secondary v1-alert-ack" onClick={() => handleAcknowledgeAlert(acc.id, a.id)}>知道了</button>
+                                      <div key={a.id}>
+                                        <div className={`v1-alert-row ${a.alert_type}`}>
+                                          <span>
+                                            {(ALERT_LABEL[a.alert_type]?.icon || '🔔') + ' ' + (ALERT_LABEL[a.alert_type]?.text || a.alert_type)}
+                                            {' '}${Number(a.threshold).toLocaleString('zh-TW')}
+                                            （觸發價 ${Number(a.price_at_trigger).toLocaleString('zh-TW')}）
+                                          </span>
+                                          <button className="btn btn-secondary v1-alert-ack" disabled={!!agentDisabledReason} title={agentDisabledReason || ''} onClick={() => handleAcknowledgeAlert(acc.id, a.id)}>知道了</button>
+                                        </div>
+                                        {a.diagnosis_status === 'done' && a.diagnosis && (
+                                          <div className="v1-alert-diagnosis">🤖 {a.diagnosis}</div>
+                                        )}
+                                        {a.diagnosis_status === 'missing' && (
+                                          <div className="v1-alert-diagnosis">🤖 診斷缺件（Ollama 異常）</div>
+                                        )}
+                                        {a.diagnosis_status === 'stale' && (
+                                          <div className="v1-alert-diagnosis">🤖 資料過期，未產生診斷</div>
+                                        )}
+                                        {a.diagnosis_status === 'cancelled' && (
+                                          <div className="v1-alert-diagnosis">🤖 診斷已取消（執行中開關被關閉）</div>
+                                        )}
                                       </div>
                                     ))}
                                   </div>
@@ -1186,7 +1340,8 @@ function App() {
                                     <span className="v1-label">📋 尚未執行 SEPA 體檢</span>
                                     <button
                                       className="btn btn-secondary"
-                                      disabled={sepaCheckingId === acc.id}
+                                      disabled={sepaCheckingId === acc.id || !!agentDisabledReason}
+                                      title={agentDisabledReason || ''}
                                       onClick={() => handleSepaCheckNow(acc)}
                                     >
                                       {sepaCheckingId === acc.id ? '體檢中…' : '📋 立即體檢'}
@@ -1487,7 +1642,7 @@ function App() {
                               <td><span className="badge-subtype">{p.category}</span></td>
                               <td style={{ textAlign: 'right' }}>
                                 <div style={{ display: 'inline-flex', gap: '0.5rem' }}>
-                                  <button className="btn-sm btn-primary" onClick={() => handleManualCrawl(p.id)}>⚡ 立即執行</button>
+                                  <button className="btn-sm btn-primary" disabled={!!agentDisabledReason} title={agentDisabledReason || ''} onClick={() => handleManualCrawl(p.id)}>⚡ 立即執行</button>
                                   <button className="btn-sm btn-secondary" onClick={() => handleOpenScraperModal(p)}>✏️ 編輯</button>
                                   <button className="btn-sm btn-danger" onClick={() => handleDeleteScraper(p.id)}>✕ 刪除</button>
                                 </div>
@@ -1512,7 +1667,7 @@ function App() {
                               <span className="scraper-cron-label">排程: {p.cron_expression || '僅手動觸發'}</span>
                             </div>
                             <div className="scraper-card-actions">
-                              <button className="btn-sm btn-primary" onClick={() => handleManualCrawl(p.id)}>⚡ 立即執行</button>
+                              <button className="btn-sm btn-primary" disabled={!!agentDisabledReason} title={agentDisabledReason || ''} onClick={() => handleManualCrawl(p.id)}>⚡ 立即執行</button>
                               <button className="btn-sm btn-secondary" onClick={() => handleOpenScraperModal(p)}>✏️ 編輯</button>
                               <button className="btn-sm btn-danger" onClick={() => handleDeleteScraper(p.id)}>✕ 刪除</button>
                             </div>

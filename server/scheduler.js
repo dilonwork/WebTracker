@@ -137,4 +137,19 @@ function startSepaScheduler() {
   console.log('[SCHEDULER] Daily SEPA check mounted (0 14 * * *)');
 }
 
-module.exports = { startScheduler, startStockScheduler, startSepaScheduler, performCrawl, schedulePage, unschedulePage };
+// Daily agent health check (14:30 Phoenix, after SEPA check; normal = quiet, only audit log)
+function startAgentHealthCheckScheduler() {
+  cron.schedule('30 14 * * *', async () => {
+    try {
+      const { runHealthCheck } = require('./agent');
+      await runHealthCheck();
+    } catch (err) {
+      console.error('[AGENT] Scheduled health check error:', err.message);
+    }
+  }, {
+    timezone: process.env.TZ || 'America/Phoenix'
+  });
+  console.log('[SCHEDULER] Daily agent health check mounted (30 14 * * *)');
+}
+
+module.exports = { startScheduler, startStockScheduler, startSepaScheduler, startAgentHealthCheckScheduler, performCrawl, schedulePage, unschedulePage };
