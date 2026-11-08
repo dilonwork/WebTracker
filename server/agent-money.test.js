@@ -212,7 +212,7 @@ async function main() {
     assert.equal(input.amount, 500);
   });
 
-  await ok('驗收 6：mock 標示—付發票／換匯／對外下單都標明未真的執行', async () => {
+  await ok('驗收 6：mock 標示—付發票／換匯都標明未真的執行（place_external_order 第 3a 階段改走紙上交易，見 agent-paper-trade.test.js）', async () => {
     const db = seedDb();
     await openGates(agent, db);
     const r1 = await agent.executeHighPrivilegeAction('pay_invoice', { amount: 200, target: '測試對象' }, 'user', { db });
@@ -222,10 +222,6 @@ async function main() {
     const r2 = await agent.executeHighPrivilegeAction('fx_convert', { amount: 200, target: '測試對象' }, 'user', { db });
     assert.equal(r2.ok, true);
     assert.match(r2.summary, /未真的換匯/);
-    const r3 = await agent.executeHighPrivilegeAction('place_external_order', { amount: 200, target: '測試對象' }, 'user', { db });
-    assert.equal(r3.ok, true);
-    assert.match(r3.summary, /mock/);
-    assert.match(r3.summary, /未真的對外下單/);
   });
 
   await ok('update_high_setting：指名清單為空，任何設定改動都擋下', async () => {

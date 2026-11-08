@@ -121,6 +121,13 @@ function App() {
   // D 級最高權限（動錢／改關鍵設定／對外下單）：金額、對象、上限輸入
   const [hpAmount, setHpAmount] = useState('');
   const [hpTarget, setHpTarget] = useState('');
+  // 第 3a 階段紙上交易表單：標的、方向、數量、市價／限價、DAY／GTC
+  const [poTicker, setPoTicker] = useState('');
+  const [poSide, setPoSide] = useState('BUY');
+  const [poQuantity, setPoQuantity] = useState('');
+  const [poOrderType, setPoOrderType] = useState('MARKET');
+  const [poLimitPrice, setPoLimitPrice] = useState('');
+  const [poDuration, setPoDuration] = useState('DAY');
   const [capSingleInput, setCapSingleInput] = useState('');
   const [capDailyInput, setCapDailyInput] = useState('');
   const [isHpRunning, setIsHpRunning] = useState(false);
@@ -357,8 +364,16 @@ function App() {
     { key: 'money_transfer', label: '轉帳', desc: '第 1 階段只接 mock，不會真的轉帳' },
     { key: 'pay_invoice', label: '付發票', desc: '第 1 階段只接 mock，不會真的付款' },
     { key: 'fx_convert', label: '換匯', desc: '第 1 階段只接 mock，不會真的換匯' },
-    { key: 'place_external_order', label: '對外下單', desc: '第 1 階段只接 mock，只記錄待執行，不會真的下單' },
   ];
+  // 紙上交易可下單的標的：持倉帳戶的 ticker（去重、大寫、排序）；沒有獨立關注清單表，先以持倉為準
+  const allowedTickers = [...new Set(accounts.map(a => String(a.ticker || '').trim().toUpperCase()).filter(Boolean))].sort();
+  const poEffectiveTicker = poTicker || allowedTickers[0] || '';
+  const poSelectedAccount = accounts.find(a => String(a.ticker || '').trim().toUpperCase() === poEffectiveTicker);
+  // 預估總金額：限價單用限價，市價單用該檔最新價（每小時 Yahoo 抓價）；抓不到就未知，server 端下單時再算
+  const poEstPrice = poOrderType === 'LIMIT' ? Number(poLimitPrice) : (poSelectedAccount ? Number(poSelectedAccount.last_price) : NaN);
+  const poEstNotional = Number.isFinite(poEstPrice) && poEstPrice > 0 && Number(poQuantity) > 0
+    ? Math.round(Number(poQuantity) * poEstPrice * 100) / 100
+    : null;
 
   // 白名單按鈕停用原因（null 表示可執行；設定未載入前先停用）
   const agentDisabledReason = !agentSettings
@@ -483,6 +498,76 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type, amount, target: hpTarget }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        fetchAgentAudit();
+        alert(data.summary || '已執行');
+      } else {
+        alert(data.error || '執行動作失敗');
+      }
+    } catch (err: any) {
+      alert('請求失敗：' + err.message);
+    } finally {
+      setIsHpRunning(false);
+    }
+  };
+
+  // 第 3a 階段紙上交易：表單驗證 → 前端預檢上限（有預估總金額時先擋，server 端再擋一次）
+  // → 確認框（標的／方向／數量／價格／有效期／預估總金額／上限／後果）→ 送出，server 用 Yahoo 現價模擬成交。
+  const handlePaperOrder = async () => {
+    if (!agentSettings) { alert('Agent 設定載入中，請稍後再試'); return; }
+    const ticker = poEffectiveTicker;
+    const quantity = Number(poQuantity);
+    if (!ticker) { alert('請先選擇標的（目前只有持倉標的可以紙上下單）'); return; }
+    if (!allowedTickers.includes(ticker)) { alert(`標的 ${ticker} 不在持倉清單內`); return; }
+    if (!Number.isInteger(quantity) || quantity <= 0) { alert('數量必須是正整數（整股）'); return; }
+    if (poOrderType === 'LIMIT' && (!Number.isFinite(Number(poLimitPrice)) || Number(poLimitPrice) <= 0)) { alert('限價單請輸入有效的限價（正數）'); return; }
+    const capSingle = Number(agentSettings.agent_money_cap_single ?? 0);
+    const capDaily = Number(agentSettings.agent_money_cap_daily ?? 0);
+    if (poEstNotional != null) {
+      if (poEstNotional > capSingle) {
+        alert(`已擋下，未執行：預估總金額 $${poEstNotional} 超過單筆上限 $${capSingle}`);
+        return;
+      }
+      try {
+        const spentRes = await fetch('/api/agent/today-money-spent');
+        if (spentRes.ok) {
+          const spentData = await spentRes.json().catch(() => ({}));
+          const spentToday = Number(spentData.spent_today ?? 0);
+          if (spentToday + poEstNotional > capDaily) {
+            alert(`已擋下，未執行：當日累計 $${spentToday}＋本筆 $${poEstNotional} 超過每日上限 $${capDaily}`);
+            return;
+          }
+        }
+        // 查不到當日累計時不擋，繼續走確認框；server 端執行時會再算一次，仍是最後一道防線。
+      } catch (err) {
+        console.error('查詢當日累計失敗，改由 server 端把關：', err);
+      }
+    }
+    const priceText = poOrderType === 'LIMIT' ? `限價 $${Number(poLimitPrice)}` : '市價';
+    const ok = window.confirm(
+      `確認執行紙上下單（模擬成交，不會真的下單）：\n` +
+      `標的：${ticker}\n` +
+      `方向：${poSide === 'BUY' ? '買進' : '賣出'}\n` +
+      `數量：${quantity} 股\n` +
+      `價格：${priceText}\n` +
+      `有效期：${poDuration === 'DAY' ? '當日有效' : '長期有效'}\n` +
+      `預估總金額：${poEstNotional != null ? '$' + poEstNotional : '未知（以下單時 Yahoo 現價計）'}\n` +
+      `單筆上限：$${capSingle}　每日上限：$${capDaily}\n` +
+      `後果：紙上交易，只寫稽核紀錄，不改持倉、不碰真錢。`
+    );
+    if (!ok) return;
+    setIsHpRunning(true);
+    try {
+      const res = await fetch('/api/agent/high-privilege-actions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'place_external_order', ticker, side: poSide, quantity,
+          order_type: poOrderType, duration: poDuration,
+          limit_price: poOrderType === 'LIMIT' ? Number(poLimitPrice) : null,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
@@ -1171,7 +1256,7 @@ function App() {
                     {highPrivilegeDisabledReason && (
                       <p className="no-data-hint">⚠️ D 級動作已停用：{highPrivilegeDisabledReason}</p>
                     )}
-                    <p className="no-data-hint">動錢、改關鍵設定、對外下單都在這裡。第 1 階段只接 mock，不會真的轉帳、付款、換匯或下單；每筆都要在確認框點頭才執行。</p>
+                    <p className="no-data-hint">動錢、改關鍵設定都在這裡（第 1 階段只接 mock，不會真的轉帳、付款或換匯）；對外下單已升級為紙上交易（下方表單），模擬成交、不會真的下單；每筆都要在確認框點頭才執行。</p>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
                       <span className="v1-label">單筆上限 $</span>
                       <input type="number" min="0" inputMode="decimal" className="url-input" style={{ width: 120 }} placeholder={String(agentSettings.agent_money_cap_single ?? 0)} value={capSingleInput} onChange={e => setCapSingleInput(e.target.value)} />
@@ -1201,6 +1286,49 @@ function App() {
                       <button className="btn btn-secondary" disabled title="目前沒有開放以最高權限修改的設定">改關鍵設定（未開放）</button>
                     </div>
                     <p className="no-data-hint">目前單筆上限 ${Number(agentSettings.agent_money_cap_single ?? 0)}、每日上限 ${Number(agentSettings.agent_money_cap_daily ?? 0)}（0＝一律擋下）。改上限本身也要二次確認。</p>
+                    {/* 第 3a 階段：紙上下單（模擬成交，不會真的下單） */}
+                    <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', marginTop: 12, paddingTop: 12 }}>
+                      <h4 style={{ margin: '0 0 8px' }}>📈 紙上下單（模擬成交，不會真的下單）</h4>
+                      <p className="no-data-hint">流程照真的跑：D 級閘門＋逐筆確認＋單筆／每日上限；只在美股一般交易時段（週一至週五 09:30–16:00 美東時間）接受；只開放持倉標的；成交價用 Yahoo 現價模擬，不改持倉、不碰真錢。</p>
+                      {allowedTickers.length === 0 ? (
+                        <p className="no-data-hint">目前沒有持倉標的，請先新增持倉再紙上下單。</p>
+                      ) : (
+                        <>
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                            <select className="url-input" style={{ width: 130 }} value={poEffectiveTicker} onChange={e => setPoTicker(e.target.value)} title="標的（只開放持倉標的）">
+                              {allowedTickers.map(t => (<option key={t} value={t}>{t}</option>))}
+                            </select>
+                            <select className="url-input" style={{ width: 100 }} value={poSide} onChange={e => setPoSide(e.target.value)} title="買賣方向">
+                              <option value="BUY">買進</option>
+                              <option value="SELL">賣出</option>
+                            </select>
+                            <input type="number" min="1" step="1" inputMode="numeric" className="url-input" style={{ width: 120 }} placeholder="數量（股）" value={poQuantity} onChange={e => setPoQuantity(e.target.value)} />
+                            <select className="url-input" style={{ width: 100 }} value={poOrderType} onChange={e => setPoOrderType(e.target.value)} title="價格類型">
+                              <option value="MARKET">市價</option>
+                              <option value="LIMIT">限價</option>
+                            </select>
+                            {poOrderType === 'LIMIT' && (
+                              <input type="number" min="0" inputMode="decimal" className="url-input" style={{ width: 120 }} placeholder="限價" value={poLimitPrice} onChange={e => setPoLimitPrice(e.target.value)} />
+                            )}
+                            <select className="url-input" style={{ width: 130 }} value={poDuration} onChange={e => setPoDuration(e.target.value)} title="有效期">
+                              <option value="DAY">當日有效</option>
+                              <option value="GTC">長期有效</option>
+                            </select>
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                            <button
+                              className="btn btn-primary"
+                              disabled={isHpRunning || !!highPrivilegeDisabledReason || !Number.isInteger(Number(poQuantity)) || Number(poQuantity) <= 0 || (poOrderType === 'LIMIT' && !(Number(poLimitPrice) > 0))}
+                              title={highPrivilegeDisabledReason || '紙上下單：模擬成交，不會真的下單'}
+                              onClick={handlePaperOrder}
+                            >
+                              紙上下單
+                            </button>
+                            <span className="no-data-hint">預估總金額：{poEstNotional != null ? `$${poEstNotional.toLocaleString('zh-TW')}` : '未知（市價單以下單時 Yahoo 現價計）'}</span>
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </>
               ) : (

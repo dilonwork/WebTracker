@@ -5,6 +5,8 @@
 // D 級最高權限（動錢／改關鍵設定／對外下單）：獨立入口 executeHighPrivilegeAction，
 // 三道閘門（總開關＋最高權限開關＋逐筆點頭二次確認）＋金額上限（預設 0＝一律擋下）。
 // 第 1 階段動錢只接 mock，不接 Stripe SDK、不碰金鑰、不發網路請求。
+// 第 3a 階段：place_external_order 升級為紙上交易（模擬成交，見 executePaperOrder），
+// 其餘動錢仍只接 mock；真的下單要等第 3b 接 Schwab。
 // 總開關關掉：agent 的診斷、健檢、待批准動作全部停；每小時 Yahoo 抓價、
 // 每天 14:00 SEPA 體檢、網站爬取照常寫資料（那是資料層，不歸 agent 管）。
 // NOTE: lazy-require db / sepa / scheduler / stock so this module can be
@@ -174,6 +176,135 @@ async function getTodayMoneySpent(db = getDb(), sinceISO = phoenixMidnightISO())
   return spent;
 }
 
+// 美股一般交易時段（週一至週五 09:30–16:00 美東時間）。
+// 不判斷國定假日：美股休市日仍視為可交易（見 README 已知限制）。
+// now 可注入，方便單元測試；預設用現在時間。
+function isUsRegularSession(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'short', hour: '2-digit', minute: '2-digit',
+    hour12: false, hourCycle: 'h23',
+  }).formatToParts(now);
+  const get = (t) => parts.find((p) => p.type === t)?.value;
+  const weekday = get('weekday');
+  if (weekday === 'Sat' || weekday === 'Sun') return false;
+  const mins = Number(get('hour')) * 60 + Number(get('minute'));
+  return mins >= 9 * 60 + 30 && mins < 16 * 60;
+}
+
+// 可下紙上單的標的：fin_accounts 已有持倉的 ticker（去重、大寫、去空白）。
+// 目前沒有獨立的關注清單表，所以先以持倉為準；要加關注清單是後續工作。
+async function getAllowedTickers(db = getDb()) {
+  const { rows } = await db.query(
+    `SELECT DISTINCT UPPER(TRIM(ticker)) AS ticker FROM fin_accounts
+     WHERE ticker IS NOT NULL AND TRIM(ticker) <> ''`
+  );
+  const tickers = rows.map((r) => String(r.ticker || '').trim().toUpperCase()).filter(Boolean);
+  return [...new Set(tickers)]; // SQL 已 DISTINCT，這裡再去重一次，防 DB 層沒去重
+}
+
+// 第 3a 階段：紙上交易（place_external_order）。
+// 流程照真的跑（閘門已在上游驗過，這裡驗參數、標的、時段、取價、上限），
+// 執行那一步改成模擬成交：用 Yahoo 現價當模擬成交價，明確標示 paper trade；
+// 不接券商、不碰真錢、不發下單請求、不改持倉與帳戶餘額，只寫稽核紀錄。
+// 限價單的限價是防線：買進限價低於現價、賣出限價高於現價 → 未達可成交條件，
+// 直接擋下（不留待成交單）。
+async function executePaperOrder(params, settings, base, deps = {}) {
+  const db = deps.db || getDb();
+  const ticker = String(params.ticker || '').trim().toUpperCase();
+  const side = String(params.side || '').trim().toUpperCase();
+  const quantity = Number(params.quantity);
+  const orderType = String(params.order_type || 'MARKET').trim().toUpperCase();
+  const duration = String(params.duration || 'DAY').trim().toUpperCase();
+  const limitPrice = params.limit_price == null || params.limit_price === '' ? null : Number(params.limit_price);
+  const snap = { ...params, paper_trade: true, ticker, side, quantity, order_type: orderType, duration, limit_price: limitPrice };
+  const orderBase = { ...base, ticker, input_snapshot: snap };
+
+  const invalid = async (msg) => {
+    await writeAudit(db, { ...orderBase, result: 'invalid', output_summary: `未執行：${msg}` });
+    return { ok: false, invalid: true, error: msg };
+  };
+  const blocked = async (msg) => {
+    await writeAudit(db, { ...orderBase, result: 'blocked', output_summary: `未執行：${msg}` });
+    return { ok: false, blocked: true, error: msg };
+  };
+
+  // 1. 參數驗證
+  if (!ticker) return invalid('請輸入標的代碼');
+  if (side !== 'BUY' && side !== 'SELL') return invalid('買賣方向只支援買進（BUY）或賣出（SELL），不支援放空');
+  if (!Number.isInteger(quantity) || quantity <= 0) return invalid('數量必須是正整數（整股）');
+  if (orderType !== 'MARKET' && orderType !== 'LIMIT') return invalid('價格類型只支援市價（MARKET）或限價（LIMIT）');
+  if (duration !== 'DAY' && duration !== 'GTC') return invalid('有效期只支援當日有效（DAY）或長期有效（GTC）');
+  if (orderType === 'LIMIT' && (limitPrice == null || !Number.isFinite(limitPrice) || limitPrice <= 0)) {
+    return invalid('限價單請輸入有效的限價（正數）');
+  }
+
+  // 2. 標的限制：只開放持倉清單內的標的
+  const allowed = await getAllowedTickers(db);
+  if (!allowed.includes(ticker)) {
+    return blocked(`標的 ${ticker} 不在持倉清單內，紙上下單只開放已有持倉的標的`);
+  }
+
+  // 3. 交易時段：只在美股一般交易時段接受
+  if (!isUsRegularSession(deps.now || new Date())) {
+    return blocked('目前不是美股一般交易時段（週一至週五 09:30–16:00 美東時間），紙上下單已擋下');
+  }
+
+  // 4. 取價：Yahoo 現價當模擬成交價
+  const stock = deps.stock || require('./stock');
+  let quote = null;
+  try {
+    quote = await stock.fetchYahooQuote(ticker);
+  } catch (err) {
+    quote = null;
+  }
+  if (!quote || !Number.isFinite(Number(quote.price)) || Number(quote.price) <= 0) {
+    await writeAudit(db, { ...orderBase, result: 'error', output_summary: `執行失敗：Yahoo 無法取得 ${ticker} 現價，未成交` });
+    return { ok: false, error: `Yahoo 無法取得 ${ticker} 現價` };
+  }
+  const fillPrice = Number(quote.price);
+
+  // 5. 限價檢查：限價是防線，未達可成交條件直接擋下
+  if (orderType === 'LIMIT' && side === 'BUY' && limitPrice < fillPrice) {
+    return blocked(`限價 $${limitPrice} 低於現價 $${fillPrice}，未達可成交條件，紙上單未成交`);
+  }
+  if (orderType === 'LIMIT' && side === 'SELL' && limitPrice > fillPrice) {
+    return blocked(`限價 $${limitPrice} 高於現價 $${fillPrice}，未達可成交條件，紙上單未成交`);
+  }
+
+  // 6. 金額與上限：下單金額＝數量 × 模擬成交價（與其餘動錢共用單筆／每日上限）
+  const notional = Math.round(quantity * fillPrice * 100) / 100;
+  if (notional > settings.agent_money_cap_single) {
+    return blocked(`紙上單總金額 $${notional} 超過單筆上限 $${settings.agent_money_cap_single}`);
+  }
+  const spentToday = await getTodayMoneySpent(db);
+  if (spentToday + notional > settings.agent_money_cap_daily) {
+    return blocked(`當日累計 $${spentToday}＋本筆 $${notional} 超過每日上限 $${settings.agent_money_cap_daily}`);
+  }
+
+  // 7. 執行前再檢查一次開關：執行中被關掉 → 中止，不留半成品
+  const settingsNow = await getSettings(db);
+  if (highPrivilegeDisabledReason(settingsNow)) {
+    await writeAudit(db, {
+      ...orderBase, settings_snapshot: settingsNow, result: 'cancelled',
+      output_summary: '執行中開關被關閉，已中止，未寫入執行結果',
+    });
+    return { ok: false, cancelled: true };
+  }
+
+  // 8. 模擬成交：只寫稽核，不改持倉、不改帳戶餘額
+  const finalSnap = { ...snap, fill_price: fillPrice, amount: notional };
+  const sideLabel = side === 'BUY' ? '買進' : '賣出';
+  const priceLabel = orderType === 'LIMIT' ? `限價 $${limitPrice}` : '市價';
+  const durationLabel = duration === 'DAY' ? '當日有效' : '長期有效';
+  const summary = `紙上${sideLabel} ${quantity} 股 ${ticker}（${priceLabel}，${durationLabel}），模擬成交價 $${fillPrice}，總金額 $${notional}（paper trade，未真的下單）`;
+  await writeAudit(db, {
+    ...orderBase, settings_snapshot: settingsNow, input_snapshot: finalSnap,
+    result: 'ok', output_summary: summary,
+  });
+  return { ok: true, paper_trade: true, summary, ticker, side, quantity, fill_price: fillPrice, notional };
+}
+
 // 第 1 階段動錢 mock：不接 Stripe SDK、不碰金鑰、不發任何網路請求，
 // 只回傳一段標明 mock 的模擬結果。真的金流要等第 2 階段 Stripe 原型。
 function defaultMockExecutor(type, params) {
@@ -186,8 +317,7 @@ function defaultMockExecutor(type, params) {
       return { ok: true, mock: true, summary: `模擬付發票已記錄（mock，未真的付款）：$${amount} → ${target}` };
     case 'fx_convert':
       return { ok: true, mock: true, summary: `模擬換匯已記錄（mock，未真的換匯）：$${amount} → ${target}` };
-    case 'place_external_order':
-      return { ok: true, mock: true, summary: `對外下單已記錄待執行（mock，未真的對外下單）：$${amount} → ${target}` };
+    // place_external_order 第 3a 階段改走紙上交易（executePaperOrder），不再走 mock。
     default:
       throw new Error(`未實作的 D 級動作：${type}`);
   }
@@ -197,6 +327,7 @@ function defaultMockExecutor(type, params) {
 // - 非 D 級動作 → 直接擋下，只寫稽核，不執行
 // - 三道閘門（總開關／最高權限開關）任一不通過 → 擋下寫稽核
 // - 動錢類：金額無效 → 擋下；超過單筆上限（含上限 0）或當日累計超每日上限 → 擋下寫稽核
+// - place_external_order：第 3a 階段走紙上交易（executePaperOrder），不走通用金額流程
 // - update_high_setting：指名清單目前為空，一律擋下
 // - 執行前後重讀開關：執行中被關掉 → 中止，不留半成品（驗收 5）
 // - 每筆請求不論成功、擋下、取消都寫稽核，approved_by=user
@@ -237,6 +368,11 @@ async function executeHighPrivilegeAction(type, params = {}, source = 'user', de
       output_summary: `改關鍵設定未開放（${params.key || '未指定設定'} 不在 D 級指名清單），已擋下，未執行`,
     });
     return { ok: false, blocked: true, error: '目前沒有開放以最高權限修改的設定' };
+  }
+
+  // 第 3a 階段：紙上交易（place_external_order 走專用流程：驗參數、標的、時段、取價、上限）
+  if (type === 'place_external_order') {
+    return executePaperOrder(params, settings, base, deps);
   }
 
   // 動錢類：金額必須是正數，否則擋下
@@ -678,6 +814,7 @@ module.exports = {
   HIGH_PRIVILEGE_ACTIONS, MONEY_ACTIONS, HIGH_PRIVILEGE_SETTINGS,
   getSettings, updateSettings, agentEnabled, actionDisabledReason,
   highPrivilegeDisabledReason, getTodayMoneySpent,
+  isUsRegularSession, getAllowedTickers, executePaperOrder,
   writeAudit, checkOllama, callOllama,
   diagnoseAlert, notifyExternal, runHealthCheck,
   generateAdvisorReport, refetchOneStockPrice, executeAgentAction,
