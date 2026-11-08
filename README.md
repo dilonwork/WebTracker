@@ -38,6 +38,7 @@
 - **白名單動作**：人點一次、只做一次——確認告警、重跑 SEPA 體檢、單檔重抓 Yahoo 股價、單頁重跑爬取、產生 advisor 報告；執行開關關著時按鈕停用並講明原因，不排隊偷跑
 - **C 級永遠禁止**：改停損／目標價／門檻、分級、成本、股數，靜音或刪除告警，改網址／prompt／排程，任何交易、改資料庫結構、重啟服務——server 端強制擋下，只寫稽核不執行；但總開關關掉不影響資料層：每小時 Yahoo 抓價、每天 14:00 SEPA 體檢、網站爬取照常寫資料
 - **D 級最高權限（動錢／改關鍵設定／對外下單）**：獨立入口，與 B 白名單分開；三道閘門（總開關＋最高權限開關＋逐筆點頭二次確認）＋單筆／每日金額上限（預設 0＝一律擋下，存 `agent_settings.value_num`）；第 1 階段動錢只接 mock（轉帳／付發票／換匯／對外下單都標明未真的執行），不接 Stripe SDK、不碰金鑰；改關鍵設定的指名清單目前為空，一律擋下
+- **Stripe Treasury MCP 原型（第 2 階段，`server/stripe-prototype.js`）**：獨立模組，不接 D 級正式入口、不寫資料庫、沒有使用者面向的按鈕。工具名稱與 Stripe MCP 官方一致：`get_balance_summary`（唯讀）＋ `transfer_money`、`send_money`、`convert_currency`、`setup_recipient`（Treasury 專用，公開預覽）＋ `pay_invoice`（一般 MCP 工具，非 Treasury 專用）。沒金鑰走 mock transport，不對外發請求、結果標示模擬；有金鑰走 live transport，打 Stripe 託管的 MCP server（`https://mcp.stripe.com/mcp`，JSON-RPC tools/call）。認證只認 Agent 標籤金鑰或 OAuth（2026-11-30 前遷移，12 月起 full secret key 與未帶 Agent 標籤的 key 會被 MCP 回 401）。金鑰只從環境變數 `STRIPE_AGENT_API_KEY` 讀（`.env` 已在 gitignore），絕不進 repo、前端、稽核或 log；動錢每筆都要 `confirmed: true` 人工確認。現況：本機沒有金鑰，全部走 mock；要連真正的 Stripe 測試模式，Dylan 需在 Stripe Dashboard 開一個測試模式（sandbox）帳號用的 Agent 金鑰，只給最小權限（Balance 讀取＋ Treasury 讀寫，依需求逐項開），設進 `.env`，再在「WebTracker 功能驗證」聊天室驗收
 - **稽核軌跡**：每次 agent 動作一筆寫入 `agent_audit_log`（鳳凰城時間、動作類型、開關快照、輸入快照、模型、輸出摘要、批准來源、結果），前端只列最新 50 筆，D 級列標紅
 
 ### 🧾 近期待繳（demands）
@@ -147,7 +148,9 @@ npm run build   # tsc + vite build，產出 dist/
 │   ├── gemini.js      # Ollama AI 分析呼叫（分析＋財務診斷）
 │   ├── agent.js       # Agent 總開關與白名單：開關、診斷、健檢、通知閘門、白名單執行、C 級阻擋、D 級最高權限（mock 動錢）、稽核
 │   ├── agent.test.js  # Agent 單元測試（假 DB＋假 Ollama，`node server/agent.test.js`）
-│   ├── agent-money.test.js  # D 級單元測試（假 DB，`node server/agent-money.test.js`；`npm test` 跑兩份）
+│   ├── agent-money.test.js  # D 級單元測試（假 DB，`node server/agent-money.test.js`；`npm test` 跑三份）
+│   ├── stripe-prototype.js  # Stripe Treasury MCP 原型（第 2 階段，mock／live transport，不接 D 級入口）
+│   └── stripe-prototype.test.js  # 原型單元測試（假 httpPost，不發真實請求，`node server/stripe-prototype.test.js`）
 │   └── migrate.js     # 資料庫遷移
 ├── docs/images/       # 架構圖
 ├── Startup.sh         # 一鍵啟動腳本
