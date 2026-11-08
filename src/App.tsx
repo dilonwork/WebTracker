@@ -351,6 +351,8 @@ function App() {
 
   // D 級動作（與 server/agent.js HIGH_PRIVILEGE_ACTIONS 對照）
   const HIGH_PRIVILEGE_ACTIONS = ['money_transfer', 'pay_invoice', 'fx_convert', 'place_external_order', 'update_high_setting'];
+  // 動錢類動作（與 server/agent.js MONEY_ACTIONS 對照）：只有這四個要檢查金額上限
+  const MONEY_ACTION_KEYS = ['money_transfer', 'pay_invoice', 'fx_convert', 'place_external_order'];
   const HIGH_PRIVILEGE_META: { key: string; label: string; desc: string }[] = [
     { key: 'money_transfer', label: '轉帳', desc: '第 1 階段只接 mock，不會真的轉帳' },
     { key: 'pay_invoice', label: '付發票', desc: '第 1 階段只接 mock，不會真的付款' },
@@ -445,6 +447,28 @@ function App() {
     const capSingle = Number(agentSettings.agent_money_cap_single ?? 0);
     const capDaily = Number(agentSettings.agent_money_cap_daily ?? 0);
     const meta = HIGH_PRIVILEGE_META.find(m => m.key === type);
+    // 步驟 7 修正：超上限先在前端擋下，不要跳確認框（server 端仍會再擋一次，雙重把關）。
+    // 只對動錢類動作檢查上限；update_high_setting 沒有金額語意，照舊由 server 擋下。
+    if (MONEY_ACTION_KEYS.includes(type)) {
+      if (amount > capSingle) {
+        alert(`已擋下，未執行：金額 $${amount} 超過單筆上限 $${capSingle}`);
+        return;
+      }
+      try {
+        const spentRes = await fetch('/api/agent/today-money-spent');
+        if (spentRes.ok) {
+          const spentData = await spentRes.json().catch(() => ({}));
+          const spentToday = Number(spentData.spent_today ?? 0);
+          if (spentToday + amount > capDaily) {
+            alert(`已擋下，未執行：當日累計 $${spentToday}＋本筆 $${amount} 超過每日上限 $${capDaily}`);
+            return;
+          }
+        }
+        // 查不到當日累計時不擋，繼續走確認框；server 端執行時會再算一次，仍是最後一道防線。
+      } catch (err) {
+        console.error('查詢當日累計失敗，改由 server 端把關：', err);
+      }
+    }
     const ok = window.confirm(
       `確認執行 D 級動作：${label}\n` +
       `金額：$${amount}\n` +
@@ -1190,6 +1214,7 @@ function App() {
                       <span className="num">{formatDateTime(log.created_at)}</span>
                       <span>{HIGH_PRIVILEGE_ACTIONS.includes(log.action_type) ? <span className="agent-audit-dtag">D 級</span> : null}{log.action_type}</span>
                       <span>{log.result}</span>
+                      <span>{log.approved_by || '—'}</span>
                       <span>{log.output_summary}</span>
                     </div>
                   ))}

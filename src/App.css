@@ -1262,6 +1262,6 @@ body {
 /* Agent 總開關與白名單 */
 .agent-setting-desc { font-size: 12px; color: var(--text-secondary); font-weight: 400; }
 .v1-alert-diagnosis { font-size: 13px; font-weight: 400; color: #cbd5e1; background: rgba(148,163,184,0.08); border-radius: 8px; padding: 6px 8px; margin-top: 6px; line-height: 1.5; }
-.agent-audit-row { display: grid; grid-template-columns: 132px 150px 80px 1fr; gap: 8px; font-size: 12px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.07); align-items: baseline; }
+.agent-audit-row { display: grid; grid-template-columns: 132px 150px 80px 70px 1fr; gap: 8px; font-size: 12px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.07); align-items: baseline; }
 .agent-audit-dtag { display: inline-block; background: #c62828; color: #fff; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 999px; margin-right: 4px; }
 .agent-audit-row:last-child { border-bottom: none; }

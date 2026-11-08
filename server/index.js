@@ -536,6 +536,17 @@ app.get('/api/agent/audit', async (req, res) => {
   }
 });
 
+// 13b. 當日已執行的動錢累計（供前端確認框前先檢查每日上限；server 端執行時會再算一次）
+app.get('/api/agent/today-money-spent', async (req, res) => {
+  try {
+    const { getTodayMoneySpent } = require('./agent');
+    const spent = await getTodayMoneySpent();
+    res.json({ spent_today: spent });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 14. Execute a whitelisted agent action (server-side gate: C 級擋下、執行開關把關）
 app.post('/api/agent/actions', async (req, res) => {
   try {
