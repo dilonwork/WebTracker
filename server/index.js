@@ -500,18 +500,18 @@ app.post('/api/financials/advisor', async (req, res) => {
 
 // --- Agent 總開關與白名單 API ---
 
-// 11. Get agent settings (five switches)
+// 11. Get agent settings (six switches + two money caps)
 app.get('/api/agent/settings', async (req, res) => {
   try {
-    const { getSettings, SETTING_LABELS } = require('./agent');
+    const { getSettings, SETTING_LABELS, CAP_LABELS } = require('./agent');
     const settings = await getSettings();
-    res.json({ settings, labels: SETTING_LABELS });
+    res.json({ settings, labels: SETTING_LABELS, capLabels: CAP_LABELS });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 12. Update agent settings (only known keys, boolean values; effective immediately)
+// 12. Update agent settings (only known keys; switches boolean, money caps non-negative number; effective immediately)
 app.put('/api/agent/settings', async (req, res) => {
   try {
     const { updateSettings } = require('./agent');
@@ -545,6 +545,24 @@ app.post('/api/agent/actions', async (req, res) => {
     const result = await executeAgentAction(type, params, 'user');
     if (result.blocked) return res.status(403).json({ error: result.error });
     if (result.disabled) return res.status(409).json({ error: result.reason });
+    if (result.error) return res.status(500).json({ error: result.error });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 14b. Execute a D-level high-privilege action (server-side gate: 非 D 級／閘門／上限擋下；
+// 動錢只接 mock，第 1 階段不碰真錢）
+app.post('/api/agent/high-privilege-actions', async (req, res) => {
+  try {
+    const { executeHighPrivilegeAction } = require('./agent');
+    const { type, ...params } = req.body || {};
+    if (!type) return res.status(400).json({ error: 'type is required' });
+    const result = await executeHighPrivilegeAction(type, params, 'user');
+    if (result.blocked) return res.status(403).json({ error: result.error });
+    if (result.cancelled) return res.status(409).json({ error: '執行中開關被關閉，已中止' });
+    if (result.invalid) return res.status(400).json({ error: result.error });
     if (result.error) return res.status(500).json({ error: result.error });
     res.json(result);
   } catch (err) {

@@ -114,10 +114,16 @@ function App() {
   // SEPA 每日體檢
   const [sepaCache, setSepaCache] = useState<Record<number, any>>({});
   // Agent 總開關與白名單
-  const [agentSettings, setAgentSettings] = useState<Record<string, boolean> | null>(null);
+  const [agentSettings, setAgentSettings] = useState<Record<string, boolean | number> | null>(null);
   const [agentAudit, setAgentAudit] = useState<any[]>([]);
   const [refetchingId, setRefetchingId] = useState<number | null>(null);
   const [isHealthChecking, setIsHealthChecking] = useState(false);
+  // D 級最高權限（動錢／改關鍵設定／對外下單）：金額、對象、上限輸入
+  const [hpAmount, setHpAmount] = useState('');
+  const [hpTarget, setHpTarget] = useState('');
+  const [capSingleInput, setCapSingleInput] = useState('');
+  const [capDailyInput, setCapDailyInput] = useState('');
+  const [isHpRunning, setIsHpRunning] = useState(false);
 
   // Form States - Cash Demands
   const [demandDesc, setDemandDesc] = useState('');
@@ -333,13 +339,23 @@ function App() {
     sepa_overheat: { icon: '🔥', text: '過熱（距 50 日線 +20%）' },
   };
 
-  // Agent 五個開關中文說明（與 server/agent.js SETTING_LABELS 對照）
+  // Agent 六個開關中文說明（與 server/agent.js SETTING_LABELS 對照）
   const AGENT_SETTING_META: { key: string; label: string; desc: string }[] = [
     { key: 'agent_master', label: '總開關', desc: '關掉就壓過下面全部，agent 診斷、健檢、待批准動作全部停' },
     { key: 'agent_diagnosis', label: '告警診斷', desc: '新告警產生時，用 Ollama 寫一段診斷附在告警旁邊' },
     { key: 'agent_health_check', label: '每日健檢', desc: '每天檢查資料庫、Ollama、SEPA 體檢新鮮度，正常不打擾' },
     { key: 'agent_execution', label: '批准動作執行', desc: '人點白名單按鈕才執行動作；關著時按鈕停用並講明原因' },
     { key: 'agent_notification', label: '對外通知', desc: '告警觸發時對外發送；v1 只有站內告警，推播路徑驗證通了再開' },
+    { key: 'agent_high_privilege', label: '最高權限（動錢／改設定／對外下單）', desc: 'D 級總開關；關著時動錢、改關鍵設定、對外下單全部擋下，開著還要逐筆點頭＋二次確認' },
+  ];
+
+  // D 級動作（與 server/agent.js HIGH_PRIVILEGE_ACTIONS 對照）
+  const HIGH_PRIVILEGE_ACTIONS = ['money_transfer', 'pay_invoice', 'fx_convert', 'place_external_order', 'update_high_setting'];
+  const HIGH_PRIVILEGE_META: { key: string; label: string; desc: string }[] = [
+    { key: 'money_transfer', label: '轉帳', desc: '第 1 階段只接 mock，不會真的轉帳' },
+    { key: 'pay_invoice', label: '付發票', desc: '第 1 階段只接 mock，不會真的付款' },
+    { key: 'fx_convert', label: '換匯', desc: '第 1 階段只接 mock，不會真的換匯' },
+    { key: 'place_external_order', label: '對外下單', desc: '第 1 階段只接 mock，只記錄待執行，不會真的下單' },
   ];
 
   // 白名單按鈕停用原因（null 表示可執行；設定未載入前先停用）
@@ -349,6 +365,15 @@ function App() {
       ? '總開關已關閉'
       : agentSettings.agent_execution !== true
         ? '執行開關已關閉，請先開啟「批准動作執行」'
+        : null;
+
+  // D 級按鈕停用原因（null 表示可執行；D 級三道閘門是總開關＋最高權限開關＋逐筆點頭，不看執行開關）
+  const highPrivilegeDisabledReason = !agentSettings
+    ? 'Agent 設定載入中…'
+    : agentSettings.agent_master !== true
+      ? '總開關已關閉'
+      : agentSettings.agent_high_privilege !== true
+        ? '最高權限開關已關閉，請先開啟「最高權限（動錢／改設定／對外下單）」'
         : null;
 
   // Agent 白名單動作（server 端把關：C 級擋下、執行開關把關）
@@ -408,6 +433,71 @@ function App() {
       alert('請求失敗：' + err.message);
     } finally {
       setIsHealthChecking(false);
+    }
+  };
+
+  // D 級最高權限動作：先出確認框（動作、金額、對象、上限、後果），按確認才送出；
+  // 送出後顯示結果，不自動重試。server 端會再把關一次（閘門／上限）。
+  const handleHighPrivilegeAction = async (type: string, label: string) => {
+    const amount = Number(hpAmount);
+    if (!agentSettings) { alert('Agent 設定載入中，請稍後再試'); return; }
+    if (!Number.isFinite(amount) || amount <= 0) { alert('請先輸入有效金額（正數）'); return; }
+    const capSingle = Number(agentSettings.agent_money_cap_single ?? 0);
+    const capDaily = Number(agentSettings.agent_money_cap_daily ?? 0);
+    const meta = HIGH_PRIVILEGE_META.find(m => m.key === type);
+    const ok = window.confirm(
+      `確認執行 D 級動作：${label}\n` +
+      `金額：$${amount}\n` +
+      `對象：${hpTarget || '未指定對象'}\n` +
+      `單筆上限：$${capSingle}　每日上限：$${capDaily}\n` +
+      `後果：${meta ? meta.desc : ''}執行結果會寫進稽核紀錄。`
+    );
+    if (!ok) return;
+    setIsHpRunning(true);
+    try {
+      const res = await fetch('/api/agent/high-privilege-actions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, amount, target: hpTarget }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        fetchAgentAudit();
+        alert(data.summary || '已執行');
+      } else {
+        alert(data.error || '執行動作失敗');
+      }
+    } catch (err: any) {
+      alert('請求失敗：' + err.message);
+    } finally {
+      setIsHpRunning(false);
+    }
+  };
+
+  // 改金額上限本身也要二次確認
+  const handleUpdateMoneyCap = async (key: string, label: string, rawValue: string) => {
+    if (!rawValue || rawValue.trim() === '') { alert('請先輸入上限金額'); return; }
+    const value = Number(rawValue);
+    if (!Number.isFinite(value) || value < 0) { alert('上限必須是非負數字'); return; }
+    const ok = window.confirm(`確認修改${label}為 $${value}？\n（0＝一律擋下。改完立即生效。）`);
+    if (!ok) return;
+    try {
+      const res = await fetch('/api/agent/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [key]: value }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAgentSettings(data.settings);
+        fetchAgentAudit();
+        alert(`${label}已改為 $${value}`);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert('更新上限失敗：' + (data.error || res.statusText));
+      }
+    } catch (err: any) {
+      alert('請求失敗：' + err.message);
     }
   };
 
@@ -1051,6 +1141,43 @@ function App() {
                     <p className="no-data-hint">⚠️ 白名單動作已停用：{agentDisabledReason}</p>
                   )}
                   <p className="no-data-hint">白名單動作（人點一次、只做一次）：確認告警、重跑 SEPA 體檢、單檔重抓 Yahoo 股價、單頁重跑爬取、產生 advisor 報告。改停損／目標價／分級／成本／股數、靜音或刪除告警、改網址或排程、交易等動作 agent 永遠不做。</p>
+                  {/* D 級最高權限（動錢／改關鍵設定／對外下單） */}
+                  <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', marginTop: 12, paddingTop: 12 }}>
+                    <h4 style={{ margin: '0 0 8px' }}>🔒 最高權限級（D 級）</h4>
+                    {highPrivilegeDisabledReason && (
+                      <p className="no-data-hint">⚠️ D 級動作已停用：{highPrivilegeDisabledReason}</p>
+                    )}
+                    <p className="no-data-hint">動錢、改關鍵設定、對外下單都在這裡。第 1 階段只接 mock，不會真的轉帳、付款、換匯或下單；每筆都要在確認框點頭才執行。</p>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+                      <span className="v1-label">單筆上限 $</span>
+                      <input type="number" min="0" inputMode="decimal" className="url-input" style={{ width: 120 }} placeholder={String(agentSettings.agent_money_cap_single ?? 0)} value={capSingleInput} onChange={e => setCapSingleInput(e.target.value)} />
+                      <button className="btn btn-secondary" onClick={() => handleUpdateMoneyCap('agent_money_cap_single', '單筆上限', capSingleInput)}>設定單筆上限</button>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+                      <span className="v1-label">每日上限 $</span>
+                      <input type="number" min="0" inputMode="decimal" className="url-input" style={{ width: 120 }} placeholder={String(agentSettings.agent_money_cap_daily ?? 0)} value={capDailyInput} onChange={e => setCapDailyInput(e.target.value)} />
+                      <button className="btn btn-secondary" onClick={() => handleUpdateMoneyCap('agent_money_cap_daily', '每日上限', capDailyInput)}>設定每日上限</button>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                      <input type="number" min="0" inputMode="decimal" className="url-input" style={{ width: 140 }} placeholder="金額（必填）" value={hpAmount} onChange={e => setHpAmount(e.target.value)} />
+                      <input type="text" className="url-input" style={{ flex: 1, minWidth: 160 }} placeholder="對象（例如：測試對象）" value={hpTarget} onChange={e => setHpTarget(e.target.value)} />
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {HIGH_PRIVILEGE_META.map(m => (
+                        <button
+                          key={m.key}
+                          className="btn btn-primary"
+                          disabled={isHpRunning || !!highPrivilegeDisabledReason || !hpAmount || Number(hpAmount) <= 0}
+                          title={highPrivilegeDisabledReason || m.desc}
+                          onClick={() => handleHighPrivilegeAction(m.key, m.label)}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
+                      <button className="btn btn-secondary" disabled title="目前沒有開放以最高權限修改的設定">改關鍵設定（未開放）</button>
+                    </div>
+                    <p className="no-data-hint">目前單筆上限 ${Number(agentSettings.agent_money_cap_single ?? 0)}、每日上限 ${Number(agentSettings.agent_money_cap_daily ?? 0)}（0＝一律擋下）。改上限本身也要二次確認。</p>
+                  </div>
                 </>
               ) : (
                 <p className="no-data-hint">Agent 設定載入中…</p>
@@ -1061,7 +1188,7 @@ function App() {
                   {agentAudit.map(log => (
                     <div key={log.id} className="agent-audit-row">
                       <span className="num">{formatDateTime(log.created_at)}</span>
-                      <span>{log.action_type}</span>
+                      <span>{HIGH_PRIVILEGE_ACTIONS.includes(log.action_type) ? <span className="agent-audit-dtag">D 級</span> : null}{log.action_type}</span>
                       <span>{log.result}</span>
                       <span>{log.output_summary}</span>
                     </div>

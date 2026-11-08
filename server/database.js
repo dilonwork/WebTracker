@@ -137,7 +137,8 @@ const initDb = async () => {
       )
     `);
 
-    // Agent 總開關與白名單：五個開關存 DB（改了立即生效，不用重啟）
+    // Agent 總開關與白名單：六個開關＋兩個 D 級金額上限存 DB（改了立即生效，不用重啟）
+    // value 是 BOOLEAN 欄位（開關用）；value_num 是 NUMERIC 欄位（金額上限用，預設 0）
     await pool.query(`
       CREATE TABLE IF NOT EXISTS agent_settings (
         key TEXT PRIMARY KEY,
@@ -145,17 +146,21 @@ const initDb = async () => {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    await pool.query(`ALTER TABLE agent_settings ADD COLUMN IF NOT EXISTS value_num NUMERIC`);
     const agentDefaults = [
-      ['agent_master', true],
-      ['agent_diagnosis', true],
-      ['agent_health_check', true],
-      ['agent_execution', false],
-      ['agent_notification', false],
+      ['agent_master', true, null],
+      ['agent_diagnosis', true, null],
+      ['agent_health_check', true, null],
+      ['agent_execution', false, null],
+      ['agent_notification', false, null],
+      ['agent_high_privilege', false, null],
+      ['agent_money_cap_single', false, 0],
+      ['agent_money_cap_daily', false, 0],
     ];
-    for (const [key, value] of agentDefaults) {
+    for (const [key, value, valueNum] of agentDefaults) {
       await pool.query(
-        `INSERT INTO agent_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING`,
-        [key, value]
+        `INSERT INTO agent_settings (key, value, value_num) VALUES ($1, $2, $3) ON CONFLICT (key) DO NOTHING`,
+        [key, value, valueNum]
       );
     }
 

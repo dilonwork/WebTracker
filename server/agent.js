@@ -2,6 +2,9 @@
 // 規格：五個開關存 agent_settings（DB，非環境變數），改了立即生效；
 // 三級權限：A 自動（唯讀＋寫診斷／健檢／稽核）、B 白名單（人點一次做一次）、
 // C 永遠禁止（server 端強制擋下，只寫稽核不執行）。
+// D 級最高權限（動錢／改關鍵設定／對外下單）：獨立入口 executeHighPrivilegeAction，
+// 三道閘門（總開關＋最高權限開關＋逐筆點頭二次確認）＋金額上限（預設 0＝一律擋下）。
+// 第 1 階段動錢只接 mock，不接 Stripe SDK、不碰金鑰、不發網路請求。
 // 總開關關掉：agent 的診斷、健檢、待批准動作全部停；每小時 Yahoo 抓價、
 // 每天 14:00 SEPA 體檢、網站爬取照常寫資料（那是資料層，不歸 agent 管）。
 // NOTE: lazy-require db / sepa / scheduler / stock so this module can be
@@ -13,13 +16,14 @@ const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 const MODEL_NAME = process.env.OLLAMA_MODEL || 'batiai/gemma4-e4b:q4';
 
 // 五個開關：key、預設值、中文標籤
-const SETTING_KEYS = ['agent_master', 'agent_diagnosis', 'agent_health_check', 'agent_execution', 'agent_notification'];
+const SETTING_KEYS = ['agent_master', 'agent_diagnosis', 'agent_health_check', 'agent_execution', 'agent_notification', 'agent_high_privilege'];
 const SETTING_DEFAULTS = {
   agent_master: true,        // 總開關：關掉就壓過下面全部
   agent_diagnosis: true,     // 告警診斷
   agent_health_check: true,  // 每日健檢（正常不打擾）
   agent_execution: false,    // 人批准動作執行（試點穩定後 Dylan 手動開）
   agent_notification: false, // 對外通知（v1 只有站內告警，推播路徑未驗證通）
+  agent_high_privilege: false, // D 級最高權限：動錢／改關鍵設定／對外下單（預設關）
 };
 const SETTING_LABELS = {
   agent_master: { label: '總開關', desc: '關掉就壓過下面全部，agent 診斷、健檢、待批准動作全部停' },
@@ -27,6 +31,19 @@ const SETTING_LABELS = {
   agent_health_check: { label: '每日健檢', desc: '每天檢查資料庫、Ollama、SEPA 體檢新鮮度，正常不打擾' },
   agent_execution: { label: '批准動作執行', desc: '人點白名單按鈕才執行動作；關著時按鈕停用並講明原因' },
   agent_notification: { label: '對外通知', desc: '告警觸發時對外發送；v1 只有站內告警，推播路徑驗證通了再開' },
+  agent_high_privilege: { label: '最高權限（動錢／改設定／對外下單）', desc: 'D 級總開關；關著時動錢、改關鍵設定、對外下單全部擋下，開著還要逐筆點頭＋二次確認' },
+};
+
+// D 級金額上限：數字（非布林），存 agent_settings.value_num，預設 0＝一律擋下
+// agent_settings.value 是 BOOLEAN 欄位，數字放不進去，所以上限另用 value_num 欄位存。
+const CAP_KEYS = ['agent_money_cap_single', 'agent_money_cap_daily'];
+const CAP_DEFAULTS = {
+  agent_money_cap_single: 0, // 單筆上限（預設 0：任何金額都擋下）
+  agent_money_cap_daily: 0,  // 每日上限（預設 0：任何金額都擋下）
+};
+const CAP_LABELS = {
+  agent_money_cap_single: { label: '單筆上限', desc: '單筆動錢金額上限（0＝一律擋下）' },
+  agent_money_cap_daily: { label: '每日上限', desc: '當日動錢累計金額上限（0＝一律擋下）' },
 };
 
 // B 白名單：人點一次、只做一次，不批次
@@ -47,18 +64,43 @@ const BLOCKED_ACTIONS = [
   'trade', 'alter_schema', 'restart_service',
 ];
 
+// D 級最高權限動作白名單（獨立入口 executeHighPrivilegeAction，不走 B 白名單）
+// 沒列上的就是禁止；D 級動作送到 B 入口也會被擋下。
+const HIGH_PRIVILEGE_ACTIONS = [
+  'money_transfer',       // 轉帳（第 1 階段只接 mock）
+  'pay_invoice',          // 付發票（第 1 階段只接 mock）
+  'fx_convert',           // 換匯（第 1 階段只接 mock）
+  'place_external_order', // 對外下單（第 1 階段只接 mock，已記錄待執行）
+  'update_high_setting',  // 改關鍵設定（限指名清單）
+];
+// 動錢類動作：要驗金額與單筆／每日上限（place_external_order 對外下單也算動錢）
+const MONEY_ACTIONS = ['money_transfer', 'pay_invoice', 'fx_convert', 'place_external_order'];
+// D 級可改的關鍵設定指名清單：第 1 階段為空，任何設定改動都直接擋下
+const HIGH_PRIVILEGE_SETTINGS = [];
+
+// 鳳凰城今天 00:00 的 ISO 字串（每日上限累計的起算點；鳳凰城無日光節約，UTC-7）
+function phoenixMidnightISO(d = new Date()) {
+  return `${phoenixDate(d)}T00:00:00-07:00`;
+}
+
 // 鳳凰城日期字串 YYYY-MM-DD（資料新鮮度比對用）
 function phoenixDate(d = new Date()) {
   return d.toLocaleDateString('en-CA', { timeZone: process.env.TZ || 'America/Phoenix' });
 }
 
-// 讀取五個開關（缺列時補預設值）
+// 讀取六個開關＋兩個金額上限（缺列時補預設值）
+// 注意：舊資料庫可能還沒有 value_num 欄位（database.js 啟動時會補建），
+// SELECT 失敗時沿用舊行為：直接回預設值。
 async function getSettings(db = getDb()) {
-  const settings = { ...SETTING_DEFAULTS };
+  const settings = { ...SETTING_DEFAULTS, ...CAP_DEFAULTS };
   try {
-    const { rows } = await db.query('SELECT key, value FROM agent_settings');
+    const { rows } = await db.query('SELECT key, value, value_num FROM agent_settings');
     for (const r of rows) {
       if (SETTING_KEYS.includes(r.key)) settings[r.key] = r.value === true || r.value === 't';
+      else if (CAP_KEYS.includes(r.key)) {
+        const n = Number(r.value_num);
+        settings[r.key] = Number.isFinite(n) && n >= 0 ? n : CAP_DEFAULTS[r.key];
+      }
     }
   } catch (err) {
     console.error('[AGENT] getSettings failed, using defaults:', err.message);
@@ -66,19 +108,35 @@ async function getSettings(db = getDb()) {
   return settings;
 }
 
-// 更新開關（只接受已知 key、布林值；未知 key 直接 400 概念：丟錯）
+// 更新開關／上限（只接受已知 key；開關限布林值，上限限非負數字；未知 key 直接 400 概念：丟錯）
 async function updateSettings(db, patch) {
   const keys = Object.keys(patch || {});
   for (const k of keys) {
-    if (!SETTING_KEYS.includes(k)) throw new Error(`unknown setting: ${k}`);
-    if (typeof patch[k] !== 'boolean') throw new Error(`setting ${k} must be boolean`);
+    if (SETTING_KEYS.includes(k)) {
+      if (typeof patch[k] !== 'boolean') throw new Error(`setting ${k} must be boolean`);
+    } else if (CAP_KEYS.includes(k)) {
+      if (typeof patch[k] !== 'number' || !Number.isFinite(patch[k]) || patch[k] < 0) {
+        throw new Error(`setting ${k} must be a non-negative number`);
+      }
+    } else {
+      throw new Error(`unknown setting: ${k}`);
+    }
   }
   for (const k of keys) {
-    await db.query(
-      `INSERT INTO agent_settings (key, value, updated_at) VALUES ($1, $2, CURRENT_TIMESTAMP)
-       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP`,
-      [k, patch[k]]
-    );
+    if (CAP_KEYS.includes(k)) {
+      // 上限是數字，存 value_num；value 欄位是 BOOLEAN NOT NULL，放 false 當佔位
+      await db.query(
+        `INSERT INTO agent_settings (key, value, value_num, updated_at) VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+         ON CONFLICT (key) DO UPDATE SET value_num = EXCLUDED.value_num, updated_at = CURRENT_TIMESTAMP`,
+        [k, false, patch[k]]
+      );
+    } else {
+      await db.query(
+        `INSERT INTO agent_settings (key, value, updated_at) VALUES ($1, $2, CURRENT_TIMESTAMP)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP`,
+        [k, patch[k]]
+      );
+    }
   }
   return getSettings(db);
 }
@@ -86,6 +144,149 @@ async function updateSettings(db, patch) {
 // 單一功能是否可用：總開關壓過全部
 function agentEnabled(settings, feature) {
   return settings.agent_master === true && settings[feature] === true;
+}
+
+// D 級按鈕停用原因（前端顯示用；null 表示可執行）
+// 注意：D 級三道閘門是總開關＋最高權限開關＋逐筆點頭，不經過 agent_execution
+//（B 白名單才看執行開關；D 級有自己的最高權限開關把關）。
+function highPrivilegeDisabledReason(settings) {
+  if (settings.agent_master !== true) return '總開關已關閉';
+  if (settings.agent_high_privilege !== true) return '最高權限開關已關閉，請先開啟「最高權限（動錢／改設定／對外下單）」';
+  return null;
+}
+
+// 當日已執行的動錢累計（只算今天鳳凰城 00:00 後、result='ok' 的 D 級動錢）
+// 供每日上限檢查用；稽核 input_snapshot 裡的 amount 是當時批准的金額。
+async function getTodayMoneySpent(db = getDb(), sinceISO = phoenixMidnightISO()) {
+  const { rows } = await db.query(
+    `SELECT input_snapshot FROM agent_audit_log
+     WHERE action_type = ANY($1) AND result = 'ok' AND created_at >= $2`,
+    [MONEY_ACTIONS, sinceISO]
+  );
+  let spent = 0;
+  for (const r of rows) {
+    try {
+      const snap = typeof r.input_snapshot === 'string' ? JSON.parse(r.input_snapshot) : r.input_snapshot;
+      const amt = Number(snap && snap.amount);
+      if (Number.isFinite(amt) && amt > 0) spent += amt;
+    } catch (e) { /* 快照損毀就跳過，不擋流程 */ }
+  }
+  return spent;
+}
+
+// 第 1 階段動錢 mock：不接 Stripe SDK、不碰金鑰、不發任何網路請求，
+// 只回傳一段標明 mock 的模擬結果。真的金流要等第 2 階段 Stripe 原型。
+function defaultMockExecutor(type, params) {
+  const amount = Number(params.amount);
+  const target = params.target || params.recipient || '未指定對象';
+  switch (type) {
+    case 'money_transfer':
+      return { ok: true, mock: true, summary: `模擬轉帳已記錄（mock，未真的轉帳）：$${amount} → ${target}` };
+    case 'pay_invoice':
+      return { ok: true, mock: true, summary: `模擬付發票已記錄（mock，未真的付款）：$${amount} → ${target}` };
+    case 'fx_convert':
+      return { ok: true, mock: true, summary: `模擬換匯已記錄（mock，未真的換匯）：$${amount} → ${target}` };
+    case 'place_external_order':
+      return { ok: true, mock: true, summary: `對外下單已記錄待執行（mock，未真的對外下單）：$${amount} → ${target}` };
+    default:
+      throw new Error(`未實作的 D 級動作：${type}`);
+  }
+}
+
+// D 級最高權限執行入口（server 端強制把關，與 executeAgentAction 分開）：
+// - 非 D 級動作 → 直接擋下，只寫稽核，不執行
+// - 三道閘門（總開關／最高權限開關）任一不通過 → 擋下寫稽核
+// - 動錢類：金額無效 → 擋下；超過單筆上限（含上限 0）或當日累計超每日上限 → 擋下寫稽核
+// - update_high_setting：指名清單目前為空，一律擋下
+// - 執行前後重讀開關：執行中被關掉 → 中止，不留半成品（驗收 5）
+// - 每筆請求不論成功、擋下、取消都寫稽核，approved_by=user
+async function executeHighPrivilegeAction(type, params = {}, source = 'user', deps = {}) {
+  const db = deps.db || getDb();
+  const settings = await getSettings(db);
+  const base = {
+    action_type: type,
+    account_id: params.account_id ?? null,
+    ticker: params.ticker ?? null,
+    page_id: params.page_id ?? null,
+    alert_id: params.alert_id ?? null,
+    settings_snapshot: settings,
+    input_snapshot: params,
+    approved_by: source === 'user' ? 'user' : 'auto',
+  };
+
+  // 非 D 級動作（或未知動作）：預設拒絕
+  if (!HIGH_PRIVILEGE_ACTIONS.includes(type)) {
+    await writeAudit(db, {
+      ...base, result: 'blocked',
+      output_summary: `非 D 級動作（${type}），已擋下，未執行`,
+    });
+    return { ok: false, blocked: true, error: `動作 ${type} 不在 D 級白名單，禁止執行` };
+  }
+
+  // 三道閘門（總開關／最高權限開關）
+  const gateReason = highPrivilegeDisabledReason(settings);
+  if (gateReason) {
+    await writeAudit(db, { ...base, result: 'blocked', output_summary: `未執行：${gateReason}` });
+    return { ok: false, blocked: true, reason: gateReason, error: gateReason };
+  }
+
+  // update_high_setting：指名清單為空，一律擋下
+  if (type === 'update_high_setting') {
+    await writeAudit(db, {
+      ...base, result: 'blocked',
+      output_summary: `改關鍵設定未開放（${params.key || '未指定設定'} 不在 D 級指名清單），已擋下，未執行`,
+    });
+    return { ok: false, blocked: true, error: '目前沒有開放以最高權限修改的設定' };
+  }
+
+  // 動錢類：金額必須是正數，否則擋下
+  const amount = Number(params.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    await writeAudit(db, { ...base, result: 'invalid', output_summary: '未執行：金額必須是正數' });
+    return { ok: false, invalid: true, error: '金額必須是正數' };
+  }
+
+  // 單筆上限（預設 0：任何金額都擋下）
+  if (amount > settings.agent_money_cap_single) {
+    await writeAudit(db, {
+      ...base, result: 'blocked',
+      output_summary: `未執行：金額 $${amount} 超過單筆上限 $${settings.agent_money_cap_single}`,
+    });
+    return { ok: false, blocked: true, error: `金額超過單筆上限 $${settings.agent_money_cap_single}` };
+  }
+
+  // 每日上限（當日已執行累計＋本筆）
+  const spentToday = await getTodayMoneySpent(db);
+  if (spentToday + amount > settings.agent_money_cap_daily) {
+    await writeAudit(db, {
+      ...base, result: 'blocked',
+      output_summary: `未執行：當日累計 $${spentToday}＋本筆 $${amount} 超過每日上限 $${settings.agent_money_cap_daily}`,
+    });
+    return { ok: false, blocked: true, error: `當日累計超過每日上限 $${settings.agent_money_cap_daily}` };
+  }
+
+  // 執行（第 1 階段只接 mock）
+  let execResult;
+  try {
+    const executor = deps.mockExecutor || defaultMockExecutor;
+    execResult = await executor(type, params);
+  } catch (err) {
+    await writeAudit(db, { ...base, result: 'error', output_summary: `執行失敗：${err.message}` });
+    return { ok: false, error: err.message };
+  }
+
+  // 執行後再檢查一次開關：執行中被關掉 → 中止，不留半成品
+  const settingsNow = await getSettings(db);
+  if (highPrivilegeDisabledReason(settingsNow)) {
+    await writeAudit(db, {
+      ...base, settings_snapshot: settingsNow, result: 'cancelled',
+      output_summary: '執行中開關被關閉，已中止，未寫入執行結果',
+    });
+    return { ok: false, cancelled: true };
+  }
+
+  await writeAudit(db, { ...base, result: 'ok', output_summary: execResult.summary });
+  return { ok: true, mock: true, summary: execResult.summary };
 }
 
 // 白名單按鈕停用原因（前端顯示用；null 表示可執行）
@@ -472,10 +673,14 @@ async function executeAgentAction(type, params = {}, source = 'user', deps = {})
 
 module.exports = {
   SETTING_KEYS, SETTING_DEFAULTS, SETTING_LABELS,
+  CAP_KEYS, CAP_DEFAULTS, CAP_LABELS,
   WHITELIST_ACTIONS, BLOCKED_ACTIONS,
+  HIGH_PRIVILEGE_ACTIONS, MONEY_ACTIONS, HIGH_PRIVILEGE_SETTINGS,
   getSettings, updateSettings, agentEnabled, actionDisabledReason,
+  highPrivilegeDisabledReason, getTodayMoneySpent,
   writeAudit, checkOllama, callOllama,
   diagnoseAlert, notifyExternal, runHealthCheck,
   generateAdvisorReport, refetchOneStockPrice, executeAgentAction,
-  phoenixDate, MODEL_NAME,
+  executeHighPrivilegeAction,
+  phoenixDate, phoenixMidnightISO, MODEL_NAME,
 };
