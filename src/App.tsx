@@ -370,6 +370,9 @@ function App() {
   const poEffectiveTicker = poTicker || allowedTickers[0] || '';
   const poSelectedAccount = accounts.find(a => String(a.ticker || '').trim().toUpperCase() === poEffectiveTicker);
   // 預估總金額：限價單用限價，市價單用該檔最新價（每小時 Yahoo 抓價）；抓不到就未知，server 端下單時再算
+  // 金額幣別跟帳戶幣別走（台股帳戶為 TWD）；上限以美元計，確認框前先換算美元再比對（換不到匯率就不在前端預檢）
+  const poCurrency = poSelectedAccount ? String(poSelectedAccount.currency || 'USD').toUpperCase() : 'USD';
+  const poCurLabel = poCurrency === 'TWD' ? 'NT$' : '$';
   const poEstPrice = poOrderType === 'LIMIT' ? Number(poLimitPrice) : (poSelectedAccount ? Number(poSelectedAccount.last_price) : NaN);
   const poEstNotional = Number.isFinite(poEstPrice) && poEstPrice > 0 && Number(poQuantity) > 0
     ? Math.round(Number(poQuantity) * poEstPrice * 100) / 100
@@ -525,17 +528,46 @@ function App() {
     if (poOrderType === 'LIMIT' && (!Number.isFinite(Number(poLimitPrice)) || Number(poLimitPrice) <= 0)) { alert('限價單請輸入有效的限價（正數）'); return; }
     const capSingle = Number(agentSettings.agent_money_cap_single ?? 0);
     const capDaily = Number(agentSettings.agent_money_cap_daily ?? 0);
-    // 非交易時段先在前端擋下，不要跳確認框（server 端仍會再擋一次，雙重把關）
-    const nyNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
-    const nyDay = nyNow.getDay();
-    const nyMins = nyNow.getHours() * 60 + nyNow.getMinutes();
-    if (!(nyDay >= 1 && nyDay <= 5 && nyMins >= 9 * 60 + 30 && nyMins < 16 * 60)) {
-      alert('已擋下，未執行：目前不是美股一般交易時段（週一至週五 09:30–16:00 美東時間）');
-      return;
+    // 非交易時段先在前端擋下，不要跳確認框（server 端仍會再擋一次，雙重把關）；
+    // 台股代碼（2330.TW 或裸代碼 2330）走台北時間 09:00–13:30，否則走美股美東時間 09:30–16:00
+    const isTwTicker = /^\d{4,6}(\.TW)?$/i.test(ticker);
+    if (isTwTicker) {
+      const twNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
+      const twDay = twNow.getDay();
+      const twMins = twNow.getHours() * 60 + twNow.getMinutes();
+      if (!(twDay >= 1 && twDay <= 5 && twMins >= 9 * 60 && twMins < 13 * 60 + 30)) {
+        alert('已擋下，未執行：目前不是台股一般交易時段（週一至週五 09:00–13:30 台北時間）');
+        return;
+      }
+    } else {
+      const nyNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+      const nyDay = nyNow.getDay();
+      const nyMins = nyNow.getHours() * 60 + nyNow.getMinutes();
+      if (!(nyDay >= 1 && nyDay <= 5 && nyMins >= 9 * 60 + 30 && nyMins < 16 * 60)) {
+        alert('已擋下，未執行：目前不是美股一般交易時段（週一至週五 09:30–16:00 美東時間）');
+        return;
+      }
     }
-    if (poEstNotional != null) {
-      if (poEstNotional > capSingle) {
-        alert(`已擋下，未執行：預估總金額 $${poEstNotional} 超過單筆上限 $${capSingle}`);
+    // 預估總金額換算美元再比對上限（台股為 TWD）；換不到匯率就不在前端預檢，server 端把關
+    let poEstNotionalUsd: number | null = poEstNotional;
+    if (poEstNotional != null && poCurrency !== 'USD') {
+      try {
+        const fxRes = await fetch(`/api/agent/fx-rate?from=${poCurrency}&to=USD`);
+        if (fxRes.ok) {
+          const fxData = await fxRes.json().catch(() => ({}));
+          const rate = Number(fxData.rate);
+          poEstNotionalUsd = Number.isFinite(rate) && rate > 0 ? Math.round(poEstNotional * rate * 100) / 100 : null;
+        } else {
+          poEstNotionalUsd = null;
+        }
+      } catch (err) {
+        console.error('查詢匯率失敗，改由 server 端把關：', err);
+        poEstNotionalUsd = null;
+      }
+    }
+    if (poEstNotionalUsd != null) {
+      if (poEstNotionalUsd > capSingle) {
+        alert(`已擋下，未執行：預估總金額 ${poCurLabel}${poEstNotional}（折合 $${poEstNotionalUsd}）超過單筆上限 $${capSingle}`);
         return;
       }
       try {
@@ -543,8 +575,8 @@ function App() {
         if (spentRes.ok) {
           const spentData = await spentRes.json().catch(() => ({}));
           const spentToday = Number(spentData.spent_today ?? 0);
-          if (spentToday + poEstNotional > capDaily) {
-            alert(`已擋下，未執行：當日累計 $${spentToday}＋本筆 $${poEstNotional} 超過每日上限 $${capDaily}`);
+          if (spentToday + poEstNotionalUsd > capDaily) {
+            alert(`已擋下，未執行：當日累計 $${spentToday}＋本筆 $${poEstNotionalUsd} 超過每日上限 $${capDaily}`);
             return;
           }
         }
@@ -553,7 +585,10 @@ function App() {
         console.error('查詢當日累計失敗，改由 server 端把關：', err);
       }
     }
-    const priceText = poOrderType === 'LIMIT' ? `限價 $${Number(poLimitPrice)}` : '市價';
+    const priceText = poOrderType === 'LIMIT' ? `限價 ${poCurLabel}${Number(poLimitPrice)}` : '市價';
+    const estText = poEstNotional != null
+      ? (poCurrency === 'USD' ? `$${poEstNotional}` : `${poCurLabel}${poEstNotional.toLocaleString('zh-TW')}${poEstNotionalUsd != null ? `（折合 $${poEstNotionalUsd}）` : ''}`)
+      : '未知（以下單時 Yahoo 現價計）';
     const ok = window.confirm(
       `確認執行紙上下單（模擬成交，不會真的下單）：\n` +
       `標的：${ticker}\n` +
@@ -561,7 +596,7 @@ function App() {
       `數量：${quantity} 股\n` +
       `價格：${priceText}\n` +
       `有效期：${poDuration === 'DAY' ? '當日有效' : '長期有效'}\n` +
-      `預估總金額：${poEstNotional != null ? '$' + poEstNotional : '未知（以下單時 Yahoo 現價計）'}\n` +
+      `預估總金額：${estText}\n` +
       `單筆上限：$${capSingle}　每日上限：$${capDaily}\n` +
       `後果：紙上交易，只寫稽核紀錄，不改持倉、不碰真錢。`
     );
@@ -1332,7 +1367,7 @@ function App() {
                             >
                               紙上下單
                             </button>
-                            <span className="no-data-hint">預估總金額：{poEstNotional != null ? `$${poEstNotional.toLocaleString('zh-TW')}` : '未知（市價單以下單時 Yahoo 現價計）'}</span>
+                            <span className="no-data-hint">預估總金額：{poEstNotional != null ? `${poCurLabel}${poEstNotional.toLocaleString('zh-TW')}` : '未知（市價單以下單時 Yahoo 現價計）'}</span>
                           </div>
                         </>
                       )}

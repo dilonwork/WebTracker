@@ -192,6 +192,35 @@ function isUsRegularSession(now = new Date()) {
   return mins >= 9 * 60 + 30 && mins < 16 * 60;
 }
 
+// 台股一般交易時段（週一至週五 09:00–13:30 台北時間，盤中連續交易無午休）。
+// 不判斷國定假日：台股休市日仍視為可交易（與美股同樣的已知限制）。
+// 鳳凰城時間換算：台北 09:00–13:30 ＝ 鳳凰城前一晚 18:00–22:30（MST，UTC-7）。
+function isTwRegularSession(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Taipei',
+    weekday: 'short', hour: '2-digit', minute: '2-digit',
+    hour12: false, hourCycle: 'h23',
+  }).formatToParts(now);
+  const get = (t) => parts.find((p) => p.type === t)?.value;
+  const weekday = get('weekday');
+  if (weekday === 'Sat' || weekday === 'Sun') return false;
+  const mins = Number(get('hour')) * 60 + Number(get('minute'));
+  return mins >= 9 * 60 && mins < 13 * 60 + 30;
+}
+
+// 台股代碼：Yahoo 格式 2330.TW / 0050.TW（持倉表 fin_accounts 存的就是這個格式）。
+function isTwTicker(ticker) {
+  return /^\d{4,6}\.TW$/.test(String(ticker || '').trim().toUpperCase());
+}
+
+// 持倉表若存 2330.TW，傳裸代碼 2330 也認得：補 .TW 後再比對清單；
+// 美股代碼或其他代碼原樣回傳，交給持倉清單檢查擋下。
+function resolveTicker(ticker, allowed) {
+  const t = String(ticker || '').trim().toUpperCase();
+  if (allowed.includes(t)) return t;
+  if (/^\d{4,6}$/.test(t) && allowed.includes(`${t}.TW`)) return `${t}.TW`;
+  return t;
+}
 // 可下紙上單的標的：fin_accounts 已有持倉的 ticker（去重、大寫、去空白）。
 // 目前沒有獨立的關注清單表，所以先以持倉為準；要加關注清單是後續工作。
 async function getAllowedTickers(db = getDb()) {
@@ -211,7 +240,7 @@ async function getAllowedTickers(db = getDb()) {
 // 直接擋下（不留待成交單）。
 async function executePaperOrder(params, settings, base, deps = {}) {
   const db = deps.db || getDb();
-  const ticker = String(params.ticker || '').trim().toUpperCase();
+  let ticker = String(params.ticker || '').trim().toUpperCase();
   const side = String(params.side || '').trim().toUpperCase();
   const quantity = Number(params.quantity);
   const orderType = String(params.order_type || 'MARKET').trim().toUpperCase();
@@ -239,14 +268,22 @@ async function executePaperOrder(params, settings, base, deps = {}) {
     return invalid('限價單請輸入有效的限價（正數）');
   }
 
-  // 2. 標的限制：只開放持倉清單內的標的
+  // 2. 標的限制：只開放持倉清單內的標的（台股裸代碼 2330 先補 .TW 再比對）
   const allowed = await getAllowedTickers(db);
+  ticker = resolveTicker(ticker, allowed);
+  snap.ticker = ticker;
+  orderBase.ticker = ticker;
   if (!allowed.includes(ticker)) {
     return blocked(`標的 ${ticker} 不在持倉清單內，紙上下單只開放已有持倉的標的`);
   }
+  const isTw = isTwTicker(ticker);
 
-  // 3. 交易時段：只在美股一般交易時段接受
-  if (!isUsRegularSession(deps.now || new Date())) {
+  // 3. 交易時段：按市場分流——台股走台北時間，否則走美股美東時間
+  if (isTw) {
+    if (!isTwRegularSession(deps.now || new Date())) {
+      return blocked('目前不是台股一般交易時段（週一至週五 09:00–13:30 台北時間），紙上下單已擋下');
+    }
+  } else if (!isUsRegularSession(deps.now || new Date())) {
     return blocked('目前不是美股一般交易時段（週一至週五 09:30–16:00 美東時間），紙上下單已擋下');
   }
 
@@ -263,23 +300,52 @@ async function executePaperOrder(params, settings, base, deps = {}) {
     return { ok: false, error: `Yahoo 無法取得 ${ticker} 現價` };
   }
   const fillPrice = Number(quote.price);
+  const currency = String((quote.currency || 'USD')).toUpperCase();
+  const curLabel = currency === 'TWD' ? 'NT$' : '$';
+  const prevClose = quote.previousClose != null ? Number(quote.previousClose) : null;
 
   // 5. 限價檢查：限價是防線，未達可成交條件直接擋下
   if (orderType === 'LIMIT' && side === 'BUY' && limitPrice < fillPrice) {
-    return blocked(`限價 $${limitPrice} 低於現價 $${fillPrice}，未達可成交條件，紙上單未成交`);
+    return blocked(`限價 ${curLabel}${limitPrice} 低於現價 ${curLabel}${fillPrice}，未達可成交條件，紙上單未成交`);
   }
   if (orderType === 'LIMIT' && side === 'SELL' && limitPrice > fillPrice) {
-    return blocked(`限價 $${limitPrice} 高於現價 $${fillPrice}，未達可成交條件，紙上單未成交`);
+    return blocked(`限價 ${curLabel}${limitPrice} 高於現價 ${curLabel}${fillPrice}，未達可成交條件，紙上單未成交`);
+  }
+  // 台股漲跌幅限制：限價不得超出前收 ±10%（超出在真實市場根本掛不進去）；
+  // 拿不到前收時跳過這道檢查，不因此擋單。
+  if (isTw && orderType === 'LIMIT' && Number.isFinite(prevClose) && prevClose > 0) {
+    const lo = Math.round(prevClose * 0.9 * 100) / 100;
+    const hi = Math.round(prevClose * 1.1 * 100) / 100;
+    if (limitPrice < lo || limitPrice > hi) {
+      return blocked(`限價 ${curLabel}${limitPrice} 超出台股當日漲跌幅限制（前收 ${curLabel}${prevClose}，區間 ${curLabel}${lo}–${curLabel}${hi}），紙上單未成交`);
+    }
   }
 
-  // 6. 金額與上限：下單金額＝數量 × 模擬成交價（與其餘動錢共用單筆／每日上限）
+  // 6. 金額與上限：下單金額＝數量 × 模擬成交價（報價幣別）；
+  // 上限以美元計，台幣單先用 Yahoo 匯率折合美元再比對（稽核的 amount 也是折合後的美元，
+  // 當日累計才不會把台幣金額當美元加總）。換不到匯率就報錯不執行，不猜匯率。
   const notional = Math.round(quantity * fillPrice * 100) / 100;
-  if (notional > settings.agent_money_cap_single) {
-    return blocked(`紙上單總金額 $${notional} 超過單筆上限 $${settings.agent_money_cap_single}`);
+  let notionalUsd = notional;
+  if (currency !== 'USD') {
+    let rate = null;
+    try {
+      rate = await stock.fetchFxRate(currency, 'USD');
+    } catch (err) {
+      rate = null;
+    }
+    if (!rate || !Number.isFinite(Number(rate)) || Number(rate) <= 0) {
+      await writeAudit(db, { ...orderBase, result: 'error', output_summary: `執行失敗：無法取得 ${currency} 兌美元匯率，無法核對上限，未成交` });
+      return { ok: false, error: `無法取得 ${currency} 兌美元匯率` };
+    }
+    notionalUsd = Math.round(notional * Number(rate) * 100) / 100;
+  }
+  const notionalText = currency === 'USD' ? `$${notional}` : `NT$${notional.toLocaleString('zh-TW')}（折合 $${notionalUsd}）`;
+  if (notionalUsd > settings.agent_money_cap_single) {
+    return blocked(`紙上單總金額 ${notionalText} 超過單筆上限 $${settings.agent_money_cap_single}`);
   }
   const spentToday = await getTodayMoneySpent(db);
-  if (spentToday + notional > settings.agent_money_cap_daily) {
-    return blocked(`當日累計 $${spentToday}＋本筆 $${notional} 超過每日上限 $${settings.agent_money_cap_daily}`);
+  if (spentToday + notionalUsd > settings.agent_money_cap_daily) {
+    return blocked(`當日累計 $${spentToday}＋本筆 $${notionalUsd} 超過每日上限 $${settings.agent_money_cap_daily}`);
   }
 
   // 7. 執行前再檢查一次開關：執行中被關掉 → 中止，不留半成品
@@ -293,16 +359,17 @@ async function executePaperOrder(params, settings, base, deps = {}) {
   }
 
   // 8. 模擬成交：只寫稽核，不改持倉、不改帳戶餘額
-  const finalSnap = { ...snap, fill_price: fillPrice, amount: notional };
+  // amount 存折合美元（當日累計用），amount_local 存報價幣別原金額，currency 標明幣別。
+  const finalSnap = { ...snap, fill_price: fillPrice, amount: notionalUsd, amount_local: notional, currency };
   const sideLabel = side === 'BUY' ? '買進' : '賣出';
-  const priceLabel = orderType === 'LIMIT' ? `限價 $${limitPrice}` : '市價';
+  const priceLabel = orderType === 'LIMIT' ? `限價 ${curLabel}${limitPrice}` : '市價';
   const durationLabel = duration === 'DAY' ? '當日有效' : '長期有效';
-  const summary = `紙上${sideLabel} ${quantity} 股 ${ticker}（${priceLabel}，${durationLabel}），模擬成交價 $${fillPrice}，總金額 $${notional}（paper trade，未真的下單）`;
+  const summary = `紙上${sideLabel} ${quantity} 股 ${ticker}（${priceLabel}，${durationLabel}），模擬成交價 ${curLabel}${fillPrice}，總金額 ${notionalText}（paper trade，未真的下單）`;
   await writeAudit(db, {
     ...orderBase, settings_snapshot: settingsNow, input_snapshot: finalSnap,
     result: 'ok', output_summary: summary,
   });
-  return { ok: true, paper_trade: true, summary, ticker, side, quantity, fill_price: fillPrice, notional };
+  return { ok: true, paper_trade: true, summary, ticker, side, quantity, fill_price: fillPrice, notional, notional_usd: notionalUsd, currency };
 }
 
 // 第 1 階段動錢 mock：不接 Stripe SDK、不碰金鑰、不發任何網路請求，
@@ -814,7 +881,7 @@ module.exports = {
   HIGH_PRIVILEGE_ACTIONS, MONEY_ACTIONS, HIGH_PRIVILEGE_SETTINGS,
   getSettings, updateSettings, agentEnabled, actionDisabledReason,
   highPrivilegeDisabledReason, getTodayMoneySpent,
-  isUsRegularSession, getAllowedTickers, executePaperOrder,
+  isUsRegularSession, isTwRegularSession, isTwTicker, resolveTicker, getAllowedTickers, executePaperOrder,
   writeAudit, checkOllama, callOllama,
   diagnoseAlert, notifyExternal, runHealthCheck,
   generateAdvisorReport, refetchOneStockPrice, executeAgentAction,

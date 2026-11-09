@@ -35,7 +35,8 @@ async function getJsonWithRetry(url, retries = 3, delay = 1500) {
 }
 
 // Fetch latest price for a ticker from Yahoo Finance (unofficial chart API).
-// Returns { price, currency } or null on failure.
+// Returns { price, currency, previousClose } or null on failure.
+// previousClose 供台股漲跌幅 ±10% 檢查用；拿不到時為 null，呼叫端跳過該檢查。
 async function fetchYahooQuote(ticker) {
   const t = String(ticker || '').trim().toUpperCase();
   if (!t) return null;
@@ -47,7 +48,12 @@ async function fetchYahooQuote(ticker) {
       const meta = result && result.meta;
       const price = meta && (meta.regularMarketPrice ?? meta.previousClose ?? meta.chartPreviousClose);
       if (price == null || Number.isNaN(Number(price))) continue;
-      return { price: Number(price), currency: (meta.currency || '').toUpperCase() };
+      const prev = meta.previousClose ?? meta.chartPreviousClose;
+      return {
+        price: Number(price),
+        currency: (meta.currency || '').toUpperCase(),
+        previousClose: prev != null && Number.isFinite(Number(prev)) ? Number(prev) : null,
+      };
     } catch (err) {
       console.error(`[STOCK] Yahoo fetch failed for ${t} via ${host}:`, err.message);
     }

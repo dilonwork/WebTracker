@@ -6,7 +6,7 @@
     "dev": "concurrently \"vite\" \"nodemon server/index.js\"",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "node server/agent.test.js && node server/agent-money.test.js && node server/stripe-prototype.test.js && node server/agent-paper-trade.test.js"
+    "test": "node server/agent.test.js && node server/agent-money.test.js && node server/stripe-prototype.test.js && node server/agent-paper-trade.test.js && node server/agent-paper-trade-tw.test.js"
   },
   "dependencies": {
     "axios": "^1.15.0",

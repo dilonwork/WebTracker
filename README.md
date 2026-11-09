@@ -38,7 +38,7 @@
 - **白名單動作**：人點一次、只做一次——確認告警、重跑 SEPA 體檢、單檔重抓 Yahoo 股價、單頁重跑爬取、產生 advisor 報告；執行開關關著時按鈕停用並講明原因，不排隊偷跑
 - **C 級永遠禁止**：改停損／目標價／門檻、分級、成本、股數，靜音或刪除告警，改網址／prompt／排程，任何交易、改資料庫結構、重啟服務——server 端強制擋下，只寫稽核不執行；但總開關關掉不影響資料層：每小時 Yahoo 抓價、每天 14:00 SEPA 體檢、網站爬取照常寫資料
 - **D 級最高權限（動錢／改關鍵設定／對外下單）**：獨立入口，與 B 白名單分開；三道閘門（總開關＋最高權限開關＋逐筆點頭二次確認）＋單筆／每日金額上限（預設 0＝一律擋下，存 `agent_settings.value_num`）；第 1 階段動錢只接 mock（轉帳／付發票／換匯都標明未真的執行），不接 Stripe SDK、不碰金鑰；改關鍵設定的指名清單目前為空，一律擋下
-- **紙上交易（第 3a 階段，`place_external_order`）**：對外下單已升級為紙上交易，不是真的下單。流程照真的跑：D 級三道閘門＋逐筆確認＋單筆／每日上限（下單金額＝數量 × 模擬成交價）；只在美股一般交易時段（週一至週五 09:30–16:00 美東時間，國定假日不判斷）接受；只開放 `fin_accounts` 已有持倉的標的（目前沒有獨立關注清單表）；買賣方向只限買進／賣出（不支援放空），數量限正整數，市價或限價、當日或長期有效；限價單的限價是防線（買進限價低於現價、賣出限價高於現價就擋下，不留待成交單）。執行時用 Yahoo 現價當模擬成交價，結果明確標示 paper trade；不接券商、不碰真錢、不改持倉與帳戶餘額，每筆都寫 `agent_audit_log`（含標的／方向／數量／價格／總金額／模擬成交價）。真的下單要等第 3b 接 Schwab
+- **紙上交易（第 3a 階段，`place_external_order`）**：對外下單已升級為紙上交易，不是真的下單。流程照真的跑：D 級三道閘門＋逐筆確認＋單筆／每日上限（下單金額＝數量 × 模擬成交價）；時段按市場分流——美股走一般交易時段（週一至週五 09:30–16:00 美東時間），台股走一般交易時段（週一至週五 09:00–13:30 台北時間，＝鳳凰城前一晚 18:00–22:30），國定假日皆不判斷；只開放 `fin_accounts` 已有持倉的標的（目前沒有獨立關注清單表；台股代碼為 Yahoo 格式 `2330.TW`／`0050.TW`，傳裸代碼 `2330` 也會自動補 `.TW`）；買賣方向只限買進／賣出（不支援放空），數量限正整數，市價或限價、當日或長期有效；限價單的限價是防線（買進限價低於現價、賣出限價高於現價就擋下，不留待成交單），台股限價另受當日漲跌幅 ±10%（以前收計）限制，拿不到前收時跳過該檢查；台股單以台幣計價，上限以美元計，執行時用 Yahoo 匯率折合美元再比對（換不到匯率就不執行），稽核的 `amount` 存折合美元、`amount_local` 存台幣原金額。執行時用 Yahoo 現價當模擬成交價，結果明確標示 paper trade；不接券商、不碰真錢、不改持倉與帳戶餘額，每筆都寫 `agent_audit_log`（含標的／方向／數量／價格／總金額／模擬成交價）。真的下單要等第 3b 接 Schwab；台股真實下單另受台新 API 申請與 Windows COM 架構限制，見 `~/workspace/goals/webtracker-feature-development/files/phase3-real-trading-scope-v0.md`
 - **Stripe Treasury MCP 原型（第 2 階段，`server/stripe-prototype.js`）**：獨立模組，不接 D 級正式入口、不寫資料庫、沒有使用者面向的按鈕。工具名稱與 Stripe MCP 官方一致：`get_balance_summary`（唯讀）＋ `transfer_money`、`send_money`、`convert_currency`、`setup_recipient`（Treasury 專用，公開預覽）＋ `pay_invoice`（一般 MCP 工具，非 Treasury 專用）。沒金鑰走 mock transport，不對外發請求、結果標示模擬；有金鑰走 live transport，打 Stripe 託管的 MCP server（`https://mcp.stripe.com/mcp`，JSON-RPC tools/call）。認證只認 Agent 標籤金鑰或 OAuth（2026-11-30 前遷移，12 月起 full secret key 與未帶 Agent 標籤的 key 會被 MCP 回 401）。金鑰只從環境變數 `STRIPE_AGENT_API_KEY` 讀（`.env` 已在 gitignore），絕不進 repo、前端、稽核或 log；動錢每筆都要 `confirmed: true` 人工確認。現況：本機沒有金鑰，全部走 mock；要連真正的 Stripe 測試模式，Dylan 需在 Stripe Dashboard 開一個測試模式（sandbox）帳號用的 Agent 金鑰，只給最小權限（Balance 讀取＋ Treasury 讀寫，依需求逐項開），設進 `.env`，再在「WebTracker 功能驗證」聊天室驗收
 - **稽核軌跡**：每次 agent 動作一筆寫入 `agent_audit_log`（鳳凰城時間、動作類型、開關快照、輸入快照、模型、輸出摘要、批准來源、結果），前端只列最新 50 筆，D 級列標紅
 
@@ -149,8 +149,9 @@ npm run build   # tsc + vite build，產出 dist/
 │   ├── gemini.js      # Ollama AI 分析呼叫（分析＋財務診斷）
 │   ├── agent.js       # Agent 總開關與白名單：開關、診斷、健檢、通知閘門、白名單執行、C 級阻擋、D 級最高權限（mock 動錢）、稽核
 │   ├── agent.test.js  # Agent 單元測試（假 DB＋假 Ollama，`node server/agent.test.js`）
-│   ├── agent-money.test.js  # D 級單元測試（假 DB，`node server/agent-money.test.js`；`npm test` 跑四份）
+│   ├── agent-money.test.js  # D 級單元測試（假 DB，`node server/agent-money.test.js`；`npm test` 跑五份）
 │   ├── agent-paper-trade.test.js  # 第 3a 階段紙上交易單元測試（假 DB＋假 Yahoo 報價）
+│   ├── agent-paper-trade-tw.test.js  # 第 3a 擴充：台股紙上交易單元測試（台股時段／漲跌幅／台幣折合美元）
 │   ├── stripe-prototype.js  # Stripe Treasury MCP 原型（第 2 階段，mock／live transport，不接 D 級入口）
 │   └── stripe-prototype.test.js  # 原型單元測試（假 httpPost，不發真實請求，`node server/stripe-prototype.test.js`）
 │   └── migrate.js     # 資料庫遷移

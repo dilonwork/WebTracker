@@ -547,6 +547,21 @@ app.get('/api/agent/today-money-spent', async (req, res) => {
   }
 });
 
+// 13c. 即時匯率（供前端台股紙上單預估總金額換算美元、再比對上限；server 端執行時會再算一次）
+app.get('/api/agent/fx-rate', async (req, res) => {
+  try {
+    const { fetchFxRate } = require('./stock');
+    const from = String(req.query.from || '').toUpperCase();
+    const to = String(req.query.to || '').toUpperCase();
+    if (!from || !to) return res.status(400).json({ error: 'from/to is required' });
+    const rate = await fetchFxRate(from, to);
+    if (rate == null) return res.status(502).json({ error: `無法取得 ${from} 兌 ${to} 匯率` });
+    res.json({ from, to, rate });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 14. Execute a whitelisted agent action (server-side gate: C 級擋下、執行開關把關）
 app.post('/api/agent/actions', async (req, res) => {
   try {
