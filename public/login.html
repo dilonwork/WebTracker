@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0f111a" />
+  <title>登入 — WebTracker</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: #0f111a; color: #e5e7eb;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    }
+    .card {
+      width: min(360px, calc(100vw - 32px)); padding: 32px 28px; border-radius: 12px;
+      background: #171a26; border: 1px solid #262a3a;
+    }
+    h1 { margin: 0 0 4px; font-size: 20px; }
+    p.sub { margin: 0 0 24px; color: #9aa0b4; font-size: 14px; }
+    label { display: block; margin-bottom: 6px; font-size: 14px; color: #c3c8d8; }
+    input {
+      width: 100%; padding: 10px 12px; margin-bottom: 16px; border-radius: 8px;
+      border: 1px solid #2e3347; background: #0f111a; color: #e5e7eb; font-size: 16px; outline: none;
+    }
+    input:focus { border-color: #6366f1; }
+    button {
+      width: 100%; padding: 11px; border: none; border-radius: 8px; cursor: pointer;
+      background: #6366f1; color: #fff; font-size: 16px;
+    }
+    button:disabled { opacity: 0.6; cursor: wait; }
+    #error { display: none; margin-top: 14px; color: #f87171; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>WebTracker</h1>
+    <p class="sub">請輸入密碼登入</p>
+    <form id="login-form">
+      <label for="password">密碼</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" autofocus />
+      <button id="submit" type="submit">登入</button>
+    </form>
+    <div id="error"></div>
+  </div>
+  <script>
+    var form = document.getElementById('login-form');
+    var errorBox = document.getElementById('error');
+    var submitBtn = document.getElementById('submit');
+    form.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      errorBox.style.display = 'none';
+      submitBtn.disabled = true;
+      try {
+        var res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: document.getElementById('password').value })
+        });
+        if (res.ok) {
+          location.href = '/';
+          return;
+        }
+        var data = await res.json().catch(function () { return {}; });
+        errorBox.textContent = data.error || '登入失敗';
+        errorBox.style.display = 'block';
+      } catch (err) {
+        errorBox.textContent = '連線失敗：' + err.message;
+        errorBox.style.display = 'block';
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

@@ -168,7 +168,29 @@ function App() {
   const fetchAgentSettings = () => fetch('/api/agent/settings').then(res => res.json()).then(data => setAgentSettings(data.settings || null)).catch(console.error);
   const fetchAgentAudit = () => fetch('/api/agent/audit').then(res => res.json()).then(setAgentAudit).catch(console.error);
 
+  // 登入檢查：session 過期或被登出時，API 會回 401，導回登入頁
+  const checkAuth = async () => {
+    try {
+      const res = await fetch('/api/auth/status');
+      const data = await res.json().catch(() => ({}));
+      if (!data.authenticated) location.href = '/login.html';
+    } catch (err) {
+      console.error('登入狀態檢查失敗：', err);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (err) {
+      console.error('登出失敗：', err);
+    } finally {
+      location.href = '/login.html';
+    }
+  };
+
   useEffect(() => {
+    checkAuth();
     fetchAccounts();
     fetchDemands();
     fetchReports();
@@ -1083,6 +1105,13 @@ function App() {
             onClick={() => setActiveTab('scraper')}
           >
             🔍 網頁追蹤監控
+          </button>
+          <button
+            className="nav-item"
+            onClick={handleLogout}
+            title="登出 WebTracker"
+          >
+            🚪 登出
           </button>
         </nav>
       </aside>

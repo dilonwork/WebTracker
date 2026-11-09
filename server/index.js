@@ -10,6 +10,25 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// ---- 登入認證（server/auth.js）：fail closed ----
+// 未設 WEBTRACKER_PASSWORD_HASH／WEBTRACKER_AUTH_SECRET 就拒絕啟動，
+// 避免對外 VM 在無保護狀態下跑起來；本機開發可用 WEBTRACKER_AUTH_DISABLED=true 跳過。
+const { authConfigFromEnv, createAuthHandlers, requireAuth } = require('./auth');
+const authConfig = authConfigFromEnv();
+if (!authConfig.enabled) {
+  console.error(`[AUTH] 拒絕啟動：${authConfig.reason}。請在 .env 設定 WEBTRACKER_PASSWORD_HASH 與 WEBTRACKER_AUTH_SECRET（用 node scripts/gen-password-hash.js --generate 產生），或本機開發時設 WEBTRACKER_AUTH_DISABLED=true。`);
+  process.exit(1);
+}
+if (authConfig.reason) console.warn(`[AUTH] 注意：${authConfig.reason}`);
+const authHandlers = createAuthHandlers({ passwordHash: authConfig.passwordHash, secret: authConfig.secret });
+
+// 公開的 auth 端點（登入／登出／登入狀態）
+app.post('/api/auth/login', authHandlers.login);
+app.post('/api/auth/logout', authHandlers.logout);
+app.get('/api/auth/status', authHandlers.status);
+// 其餘 /api 一律要登入，未登入回 401
+app.use('/api', requireAuth(authConfig.secret));
+
 // Start background task
 startScheduler();
 startStockScheduler();
