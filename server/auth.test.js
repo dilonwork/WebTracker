@@ -177,6 +177,22 @@ async function main() {
     assert.deepEqual(statusOut.body, { authenticated: false });
   });
 
+  await ok('鎖定關閉時：連錯 6 次仍回 401 不鎖，正確密碼仍可登入', async () => {
+    const handlers = auth.createAuthHandlers({
+      passwordHash: auth.hashPassword('my-password'),
+      secret: 'test-secret-12345678901234567890',
+      lockoutEnabled: false,
+    });
+    for (let i = 0; i < 6; i++) {
+      const res = fakeRes();
+      handlers.login(fakeReq({ body: { password: 'wrong' } }), res);
+      assert.equal(res.statusCode, 401);
+    }
+    const okRes = fakeRes();
+    handlers.login(fakeReq({ body: { password: 'my-password' } }), okRes);
+    assert.equal(okRes.statusCode, 200);
+  });
+
   await ok('啟動設定檢查：缺雜湊／缺密鑰／密鑰太短都 fail closed；設齊才啟用', async () => {
     assert.equal(auth.authConfigFromEnv({}).enabled, false);
     assert.equal(auth.authConfigFromEnv({ WEBTRACKER_PASSWORD_HASH: 'scrypt:00:00' }).enabled, false);
@@ -187,6 +203,16 @@ async function main() {
     });
     assert.equal(good.enabled, true);
     assert.equal(auth.authConfigFromEnv({ WEBTRACKER_AUTH_DISABLED: 'true' }).enabled, false);
+  });
+
+  await ok('啟動設定檢查：鎖定預設開啟，設 WEBTRACKER_LOGIN_LOCKOUT_ENABLED=false 關閉', async () => {
+    const base = {
+      WEBTRACKER_PASSWORD_HASH: 'scrypt:00:00',
+      WEBTRACKER_AUTH_SECRET: 'a-very-long-secret-at-least-32-chars',
+    };
+    assert.equal(auth.authConfigFromEnv(base).lockoutEnabled, true);
+    assert.equal(auth.authConfigFromEnv({ ...base, WEBTRACKER_LOGIN_LOCKOUT_ENABLED: 'false' }).lockoutEnabled, false);
+    assert.equal(auth.authConfigFromEnv({ ...base, WEBTRACKER_LOGIN_LOCKOUT_ENABLED: 'true' }).lockoutEnabled, true);
   });
 
   console.log(`\n${passed} 項測試通過，0 項失敗（exit code ${process.exitCode || 0}）`);

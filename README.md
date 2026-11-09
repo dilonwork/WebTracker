@@ -97,7 +97,7 @@ WebTracker 部署到對外 VM 後，任何人知道網址都打得開，因此�
 - **密碼**：只認環境變數 `WEBTRACKER_PASSWORD_HASH`（scrypt 雜湊，`scrypt:<salt>:<hash>`），絕不寫明文進 repo。產生方式：`node scripts/gen-password-hash.js --generate`（隨機產生一組 20 字元密碼＋雜湊＋session 簽名密鑰，照印出的兩行貼進 `.env`）；已有密碼時用 `node scripts/gen-password-hash.js "你的密碼"` 只印雜湊。
 - **Session**：登入後發 HMAC 簽名的 `wt_session` cookie（HttpOnly、SameSite=Lax、效期 7 天），server 端不存狀態，重啟不掉登入。簽名密鑰是 `WEBTRACKER_AUTH_SECRET`（至少 32 字元），外洩等於偽造登入，只放 `.env`。
 - **保護範圍**：前端所有頁面（vite dev／preview 插件，未登入導向 `/login.html`）＋後端所有 `/api` 端點（未登入回 401）。登入頁在 `public/login.html`；App 左側選單有登出按鈕，session 過期時自動導回登入頁。
-- **防暴力破解**：同一 IP 15 分鐘內登入失敗 5 次就鎖 15 分鐘（回 429）。
+- **防暴力破解**：同一 IP 15 分鐘內登入失敗 5 次就鎖 15 分鐘（回 429）；用環境變數 `WEBTRACKER_LOGIN_LOCKOUT_ENABLED=false` 可關閉鎖定（Dylan 2026/11/08 指示先不鎖定，要恢復時刪掉這行或設 `true` 即可）。
 - **Fail closed**：兩個變數缺一，後端拒絕啟動並印出設定方法；本機開發可用 `WEBTRACKER_AUTH_DISABLED=true` 跳過（絕對不要在對外的 VM 上開）。
 - **注意**：VM 目前是 plain HTTP，cookie 沒有 Secure 旗標（開了瀏覽器不送），密碼與 session 在傳輸中是明文；建議下一步在 OCI 安全清單限縮來源 IP，或上 HTTPS。換密碼：重新產生雜湊、更新 `.env`、重啟服務即可（舊 session 同時失效需重登的是改密鑰時；只換雜湊，已登入的 session 不受影響）。
 

@@ -142,20 +142,25 @@ function clientIp(req) {
 }
 
 // ---- Auth 路由處理器（factory，方便單元測試注入設定）----
-function createAuthHandlers({ passwordHash, secret, rateLimiter = createLoginRateLimiter() }) {
+// lockoutEnabled：是否啟用登入失敗鎖定（預設開；設 false 則不鎖定、
+// 失敗也不計數。Dylan 2026/11/08 指示先不鎖定，部署時用環境變數
+// WEBTRACKER_LOGIN_LOCKOUT_ENABLED=false 關閉）。
+function createAuthHandlers({ passwordHash, secret, rateLimiter = createLoginRateLimiter(), lockoutEnabled = true }) {
   const login = (req, res) => {
     const ip = clientIp(req);
-    const locked = rateLimiter.check(ip);
-    if (locked) {
-      res.setHeader('Retry-After', String(locked.retryAfterSeconds));
-      return res.status(429).json({ error: `登入失敗次數過多，請 ${locked.retryAfterSeconds} 秒後再試` });
+    if (lockoutEnabled) {
+      const locked = rateLimiter.check(ip);
+      if (locked) {
+        res.setHeader('Retry-After', String(locked.retryAfterSeconds));
+        return res.status(429).json({ error: `登入失敗次數過多，請 ${locked.retryAfterSeconds} 秒後再試` });
+      }
     }
     const password = req && req.body && req.body.password;
     if (!passwordHash || !verifyPassword(password, passwordHash)) {
-      rateLimiter.recordFailure(ip);
+      if (lockoutEnabled) rateLimiter.recordFailure(ip);
       return res.status(401).json({ error: '密碼錯誤' });
     }
-    rateLimiter.recordSuccess(ip);
+    if (lockoutEnabled) rateLimiter.recordSuccess(ip);
     const token = createSessionToken(secret);
     res.setHeader('Set-Cookie', sessionCookieHeader(token));
     return res.json({ ok: true });
@@ -178,10 +183,13 @@ function authConfigFromEnv(env = process.env) {
   const disabled = String(env.WEBTRACKER_AUTH_DISABLED || '').toLowerCase() === 'true';
   const passwordHash = env.WEBTRACKER_PASSWORD_HASH || '';
   const secret = env.WEBTRACKER_AUTH_SECRET || '';
+  // 登入失敗鎖定預設開啟；設 WEBTRACKER_LOGIN_LOCKOUT_ENABLED=false 關閉
+  //（Dylan 2026/11/08 指示先不鎖定；要恢復鎖定時把這行刪掉或設 true 即可）。
+  const lockoutEnabled = String(env.WEBTRACKER_LOGIN_LOCKOUT_ENABLED || '').toLowerCase() !== 'false';
   if (disabled) return { enabled: false, reason: 'WEBTRACKER_AUTH_DISABLED=true（本機開發專用，絕對不要在對外 VM 上開）' };
   if (!passwordHash) return { enabled: false, reason: '缺少 WEBTRACKER_PASSWORD_HASH' };
   if (!secret || secret.length < 32) return { enabled: false, reason: '缺少 WEBTRACKER_AUTH_SECRET（至少 32 字元）' };
-  return { enabled: true, passwordHash, secret };
+  return { enabled: true, passwordHash, secret, lockoutEnabled };
 }
 
 module.exports = {

@@ -20,7 +20,7 @@ if (!authConfig.enabled) {
   process.exit(1);
 }
 if (authConfig.reason) console.warn(`[AUTH] 注意：${authConfig.reason}`);
-const authHandlers = createAuthHandlers({ passwordHash: authConfig.passwordHash, secret: authConfig.secret });
+const authHandlers = createAuthHandlers({ passwordHash: authConfig.passwordHash, secret: authConfig.secret, lockoutEnabled: authConfig.lockoutEnabled });
 
 // 公開的 auth 端點（登入／登出／登入狀態）
 app.post('/api/auth/login', authHandlers.login);
