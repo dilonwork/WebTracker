@@ -1265,3 +1265,13 @@ body {
 .agent-audit-row { display: grid; grid-template-columns: 132px 150px 80px 70px 1fr; gap: 8px; font-size: 12px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.07); align-items: baseline; }
 .agent-audit-dtag { display: inline-block; background: #c62828; color: #fff; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 999px; margin-right: 4px; }
 .agent-audit-row:last-child { border-bottom: none; }
+
+/* SEPA decision (我的決定） */
+.v1-sepa-verdict.decided { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.12); color: #cbd5e1; }
+.v1-sepa-verdict.decided b, .v1-sepa-verdict.decided span { color: #cbd5e1; }
+.v1-decision { margin: 4px 0 8px; }
+.v1-decision .v1-label { margin-bottom: 6px; }
+.v1-decision-opts { display: flex; gap: 8px; }
+.v1-decision-opts .btn { flex: 1; font-size: 13px; padding: 9px 4px; }
+.v1-decision-meta { font-size: 12px; color: var(--text-secondary); margin: 6px 0 4px; line-height: 1.6; }
+.v1-decision-change { font-size: 12px; color: #818cf8; cursor: pointer; margin-bottom: 8px; }

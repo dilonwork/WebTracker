@@ -701,27 +701,42 @@ function App() {
 
   // SEPA 行動建議：根據最新體檢數據＋持股分級算出當前最重要的行動（常駐狀態，非一次性告警）
   const TIER_LABEL: Record<string, string> = { t1: '第一級', t2: '第二級', trial: '試單' };
-  const sepaVerdict = (sepa: any, costPrice: number, tier: string): { icon: string; text: string; tone: string } | null => {
+  type SepaVerdict = { icon: string; text: string; tone: string; key: string; action: string };
+  const sepaVerdict = (sepa: any, costPrice: number, tier: string): SepaVerdict | null => {
     if (!sepa || !sepa.checked) return null;
     const c = Number(sepa.close);
     const ma50 = sepa.ma50 == null ? null : Number(sepa.ma50);
     const ma200 = sepa.ma200 == null ? null : Number(sepa.ma200);
     const wma10 = sepa.wma10 == null ? null : Number(sepa.wma10);
     const score = Number(sepa.score || 0);
-    if (ma200 && c <= ma200) return { icon: '⛔', text: '跌破 200 日線：SEPA 出清訊號', tone: 'danger' };
-    if (tier === 't1' && wma10 && c <= wma10) return { icon: '⚠️', text: '跌破 10 週線：第一級減半訊號', tone: 'warn' };
+    if (ma200 && c <= ma200) return { icon: '⛔', text: '跌破 200 日線：SEPA 出清訊號', tone: 'danger', key: 'exit_200ma', action: '出清' };
+    if (tier === 't1' && wma10 && c <= wma10) return { icon: '⚠️', text: '跌破 10 週線：第一級減半訊號', tone: 'warn', key: 'halve_10w', action: '減半' };
     if (ma50 && c <= ma50)
       return (tier === 't2' || tier === 'trial')
-        ? { icon: '⚠️', text: '收盤破 50 日線：出場訊號', tone: 'warn' }
-        : { icon: '⚠️', text: '收盤破 50 日線：轉弱', tone: 'warn' };
-    if (wma10 && c <= wma10) return { icon: '⚠️', text: '跌破 10 週線：動能轉弱', tone: 'warn' };
+        ? { icon: '⚠️', text: '收盤破 50 日線：出場訊號', tone: 'warn', key: 'exit_50ma', action: '出場' }
+        : { icon: '⚠️', text: '收盤破 50 日線：轉弱', tone: 'warn', key: 'weaken_50ma', action: '' };
+    if (wma10 && c <= wma10) return { icon: '⚠️', text: '跌破 10 週線：動能轉弱', tone: 'warn', key: 'weaken_10w', action: '' };
     if (costPrice > 0 && (c - costPrice) / costPrice <= -0.07)
-      return { icon: '🛑', text: `距成本 ${(((c - costPrice) / costPrice) * 100).toFixed(1)}%：停損`, tone: 'danger' };
+      return { icon: '🛑', text: `距成本 ${(((c - costPrice) / costPrice) * 100).toFixed(1)}%：停損`, tone: 'danger', key: 'stop_loss', action: '停損' };
     if (ma50 && (c - ma50) / ma50 >= 0.20)
-      return { icon: '🔥', text: `過熱（距 50 日線 +${(((c - ma50) / ma50) * 100).toFixed(0)}%）：考慮分批獲利`, tone: 'hot' };
-    if (score <= 4) return { icon: '👀', text: `模板轉弱（${score}/8）：提高警覺，不加碼`, tone: 'warn' };
-    if (score >= 7) return { icon: '✅', text: `模板完整（${score}/8）：續抱`, tone: 'good' };
-    return { icon: '➖', text: `模板部分轉弱（${score}/8）：觀察`, tone: 'neutral' };
+      return { icon: '🔥', text: `過熱（距 50 日線 +${(((c - ma50) / ma50) * 100).toFixed(0)}%）：考慮分批獲利`, tone: 'hot', key: 'overheat', action: '分批獲利' };
+    if (score <= 4) return { icon: '👀', text: `模板轉弱（${score}/8）：提高警覺，不加碼`, tone: 'warn', key: 'weaken_template', action: '' };
+    if (score >= 7) return { icon: '✅', text: `模板完整（${score}/8）：續抱`, tone: 'good', key: 'hold', action: '' };
+    return { icon: '➖', text: `模板部分轉弱（${score}/8）：觀察`, tone: 'neutral', key: 'watch', action: '' };
+  };
+  // 我的決定：對當前訊號記錄暫緩／已執行／之後再說（訊號改變即失效；之後再說只靜音到下次體檢）
+  const handleSepaDecision = async (acc: FinancialAccount, verdictKey: string, decision: string, checkDay: string) => {
+    const res = await fetch(`/api/financials/accounts/${acc.id}/sepa-decision`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ verdict_key: verdictKey, decision, check_date: checkDay })
+    });
+    if (res.ok) fetchSepa(acc.id);
+    else alert('儲存決定失敗');
+  };
+  const handleClearSepaDecision = async (acc: FinancialAccount) => {
+    const res = await fetch(`/api/financials/accounts/${acc.id}/sepa-decision`, { method: 'DELETE' });
+    if (res.ok) fetchSepa(acc.id);
+    else alert('清除決定失敗');
   };
 
   const dirtyCount = accounts.filter(a => {
@@ -1653,12 +1668,38 @@ function App() {
                                 {sepaCache[acc.id] && sepaCache[acc.id].checked ? (
                                   <div className="v1-sepa">
                                     {(() => {
-                                      const v = sepaVerdict(sepaCache[acc.id], Number(acc.cost_price || 0), acc.tier || '');
-                                      return v ? (
-                                        <div className={`v1-sepa-verdict ${v.tone}`}>
-                                          <span>{v.icon} {v.text}</span>
+                                      const sepa = sepaCache[acc.id];
+                                      const v = sepaVerdict(sepa, Number(acc.cost_price || 0), acc.tier || '');
+                                      if (!v) return null;
+                                      const d = sepa.decision;
+                                      const checkDay = String(sepa.check_date).slice(0, 10);
+                                      const applies = d && d.verdict_key === v.key && (d.decision !== 'later' || String(d.check_date).slice(0, 10) === checkDay);
+                                      if (applies) {
+                                        const label = d.decision === 'hold' ? `暫緩${v.action}` : d.decision === 'done' ? `已執行${v.action}` : '之後再說';
+                                        return (
+                                          <div>
+                                            <div className="v1-sepa-verdict decided"><span>✓ 已決定：{label}</span></div>
+                                            <div className="v1-decision-meta">決定日期 {String(d.decided_at).slice(0, 10)} · 訊號：{v.text} · 體檢照跑，訊號改變才重新提醒</div>
+                                            <div className="v1-decision-change" onClick={() => handleClearSepaDecision(acc)}>更改決定 ›</div>
+                                          </div>
+                                        );
+                                      }
+                                      const actionable = v.tone === 'danger' || v.tone === 'warn' || v.tone === 'hot';
+                                      return (
+                                        <div>
+                                          <div className={`v1-sepa-verdict ${v.tone}`}><span>{v.icon} {v.text}</span></div>
+                                          {actionable && (
+                                            <div className="v1-decision">
+                                              <div className="v1-label">你的決定：</div>
+                                              <div className="v1-decision-opts">
+                                                <button className="btn btn-secondary" onClick={() => handleSepaDecision(acc, v.key, 'hold', checkDay)}>暫緩不動</button>
+                                                <button className="btn btn-secondary" onClick={() => handleSepaDecision(acc, v.key, 'done', checkDay)}>已執行</button>
+                                                <button className="btn btn-secondary" onClick={() => handleSepaDecision(acc, v.key, 'later', checkDay)}>之後再說</button>
+                                              </div>
+                                            </div>
+                                          )}
                                         </div>
-                                      ) : null;
+                                      );
                                     })()}
                                     <div className="v1-stock-row total">
                                       <span className="v1-label">📋 SEPA 體檢（{sepaCache[acc.id].check_date?.slice(0, 10)}）</span>

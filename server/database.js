@@ -137,6 +137,19 @@ const initDb = async () => {
       )
     `);
 
+    // SEPA 行動建議的「我的決定」（暫緩／已執行／之後再說；訊號改變即失效）
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS fin_sepa_decisions (
+        id SERIAL PRIMARY KEY,
+        account_id INTEGER REFERENCES fin_accounts(id) ON DELETE CASCADE,
+        verdict_key TEXT NOT NULL,
+        decision TEXT NOT NULL,
+        check_date DATE NOT NULL,
+        decided_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (account_id, verdict_key)
+      )
+    `);
+
     // Agent 總開關與白名單：六個開關＋兩個 D 級金額上限存 DB（改了立即生效，不用重啟）
     // value 是 BOOLEAN 欄位（開關用）；value_num 是 NUMERIC 欄位（金額上限用，預設 0）
     await pool.query(`

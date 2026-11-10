@@ -396,6 +396,16 @@ app.get('/api/financials/accounts/:id/sepa', async (req, res) => {
     const r = rows[0];
     const template = typeof r.template === 'string' ? JSON.parse(r.template) : r.template;
     const score = ['t1','t2','t3','t4','t5','t6','t7','t8'].filter(k => template[k] === true).length;
+    const dec = await db.query(
+      `SELECT verdict_key, decision, check_date, decided_at FROM fin_sepa_decisions WHERE account_id = $1 ORDER BY decided_at DESC LIMIT 1`,
+      [id]
+    );
+    const decision = dec.rows.length > 0 ? {
+      verdict_key: dec.rows[0].verdict_key,
+      decision: dec.rows[0].decision,
+      check_date: dec.rows[0].check_date,
+      decided_at: dec.rows[0].decided_at
+    } : null;
     res.json({
       checked: true,
       check_date: r.check_date,
@@ -403,8 +413,38 @@ app.get('/api/financials/accounts/:id/sepa', async (req, res) => {
       ma200: Number(r.ma200), wma10: Number(r.wma10),
       high_52w: Number(r.high_52w), low_52w: Number(r.low_52w),
       rs_proxy: r.rs_proxy == null ? null : Number(r.rs_proxy),
-      template, score
+      template, score, decision
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4.62. Record / clear my decision for a SEPA verdict
+app.post('/api/financials/accounts/:id/sepa-decision', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { verdict_key, decision, check_date } = req.body;
+    if (!verdict_key || !['hold', 'done', 'later'].includes(decision) || !check_date) {
+      return res.status(400).json({ error: 'verdict_key, decision (hold/done/later), check_date are required' });
+    }
+    await db.query(
+      `INSERT INTO fin_sepa_decisions (account_id, verdict_key, decision, check_date)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (account_id, verdict_key) DO UPDATE SET decision = EXCLUDED.decision, check_date = EXCLUDED.check_date, decided_at = CURRENT_TIMESTAMP`,
+      [id, verdict_key, decision, check_date]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/financials/accounts/:id/sepa-decision', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    await db.query(`DELETE FROM fin_sepa_decisions WHERE account_id = $1`, [id]);
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
