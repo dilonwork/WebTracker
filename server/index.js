@@ -512,11 +512,13 @@ app.get('/api/financials/accounts/:id/flow', async (req, res) => {
 });
 
 // 4.65. 法人分析：手動觸發背景補抓前 6 個月
+// 預設只補缺（已有不重抓）；body { force: true } 時全部重抓重寫
 app.post('/api/financials/flow/backfill', async (req, res) => {
   try {
     const { backfillFlow, backfillState } = require('./institutional');
-    const r = await backfillFlow(db);
-    res.json({ ...r, backfill: backfillState });
+    const force = req.body && req.body.force === true;
+    const r = await backfillFlow(db, 6, force);
+    res.json({ ...r, force, backfill: backfillState });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -98,15 +98,22 @@ async function upsertFlow(db, accountId, tradeDate, close, f) {
   );
 }
 
-// 抓某日 T86 並寫入所有持有標的（該日已齊全時跳過不抓）
-async function fetchAndStoreDay(db, accounts, closes, iso) {
-  const { rows } = await db.query(
-    `SELECT COUNT(*)::int AS n FROM fin_institutional_flow
-     WHERE trade_date = $1 AND account_id = ANY($2)`,
-    [iso, accounts.map((a) => a.id)]
-  );
-  if (rows[0].n >= accounts.length) return 'skipped';
+// 抓某日 T86 並寫入持有標的。
+// 原則：已有資料不重抓、不重寫，只補缺少的帳戶；force=true 時才全部重抓重寫。
+// 回傳 'stored'（有寫入）/ 'skipped'（該日已齊全，未抓）/ 'nodata'（休市或尚未公布）/ 'failed'（抓取失敗）
+async function fetchAndStoreDay(db, accounts, closes, iso, force = false) {
   const dateStr = iso.replace(/-/g, '');
+  let targets = accounts;
+  if (!force) {
+    const { rows } = await db.query(
+      `SELECT account_id FROM fin_institutional_flow
+       WHERE trade_date = $1 AND account_id = ANY($2)`,
+      [iso, accounts.map((a) => a.id)]
+    );
+    const stored = new Set(rows.map((r) => r.account_id));
+    targets = accounts.filter((a) => !stored.has(a.id));
+    if (targets.length === 0) return 'skipped';
+  }
   let map = null;
   try {
     map = await fetchT86(dateStr);
@@ -116,7 +123,7 @@ async function fetchAndStoreDay(db, accounts, closes, iso) {
   }
   if (!map) return 'nodata'; // 休市或當日尚未公布
   let n = 0;
-  for (const acc of accounts) {
+  for (const acc of targets) {
     const f = map[acc.code];
     if (!f) continue;
     await upsertFlow(db, acc.id, iso, closes[acc.code][iso] ?? null, f);
@@ -126,7 +133,8 @@ async function fetchAndStoreDay(db, accounts, closes, iso) {
 }
 
 // 每日補抓：最近 daysBack 個日曆日（T86 當晚才公布，14:00 體檢時最新為前一交易日）
-async function refreshDailyFlow(db, daysBack = 5) {
+// 只補缺（已有不重抓）；force=true 時全部重抓重寫（僅手動觸發用）
+async function refreshDailyFlow(db, daysBack = 5, force = false) {
   const accounts = await getTwAccounts(db);
   if (!accounts.length) return { updated: 0 };
   const closes = {};
@@ -137,7 +145,7 @@ async function refreshDailyFlow(db, daysBack = 5) {
     const d = new Date(today.getTime() - i * 86400000);
     const ds = twDateStr(d);
     const iso = `${ds.slice(0, 4)}-${ds.slice(4, 6)}-${ds.slice(6, 8)}`;
-    const r = await fetchAndStoreDay(db, accounts, closes, iso);
+    const r = await fetchAndStoreDay(db, accounts, closes, iso, force);
     if (r === 'stored') updated++;
     if (r === 'stored' || r === 'nodata' || r === 'failed') await sleep(400);
   }
@@ -146,7 +154,8 @@ async function refreshDailyFlow(db, daysBack = 5) {
 }
 
 // 背景補抓前 months 個月（交易日取自 Yahoo 6 個月日線；不 await，跑完才寫 DB 進度）
-function backfillFlow(db, months = 6) {
+// 只補缺（已有不重抓）；force=true 時全部重抓重寫（僅手動觸發用）
+function backfillFlow(db, months = 6, force = false) {
   if (backfillState.running) return { started: false, reason: 'already running' };
   backfillState.running = true;
   backfillState.startedAt = new Date().toISOString();
@@ -170,7 +179,7 @@ function backfillFlow(db, months = 6) {
       const days = [...daySet].filter((d) => d >= cutoffIso).sort();
       backfillState.total = days.length;
       for (const iso of days) {
-        await fetchAndStoreDay(db, accounts, closes, iso);
+        await fetchAndStoreDay(db, accounts, closes, iso, force);
         backfillState.done++;
         await sleep(400);
       }
@@ -208,6 +217,7 @@ module.exports = {
   parseT86Row,
   twDateStr,
   fetchT86,
+  fetchAndStoreDay,
   getTwAccounts,
   fetchClosesMap,
   refreshDailyFlow,

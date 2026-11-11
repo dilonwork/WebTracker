@@ -891,8 +891,12 @@ function App() {
       })
       .catch(() => setFlowLoading(false));
   };
-  const handleFlowBackfill = async () => {
-    await fetch('/api/financials/flow/backfill', { method: 'POST' });
+  const handleFlowBackfill = async (force = false) => {
+    await fetch('/api/financials/flow/backfill', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force }),
+    });
     if (flowAccountId != null) fetchFlowRows(flowAccountId);
     fetchFlowAccounts();
   };
@@ -2028,7 +2032,7 @@ function App() {
                       {flowBackfill?.running
                         ? `正在背景補抓前 6 個月資料…（${flowBackfill.done}/${flowBackfill.total || '?'} 日），補完自動顯示`
                         : '尚無法人買賣超資料'}
-                      <button className="btn btn-secondary" onClick={handleFlowBackfill} style={{ marginLeft: '0.6rem' }}>↻ 補抓前 6 個月</button>
+                      <button className="btn btn-secondary" onClick={() => handleFlowBackfill(false)} style={{ marginLeft: '0.6rem' }}>↻ 補抓前 6 個月</button>
                     </div>
                   ) : (
                     <div>
@@ -2103,8 +2107,8 @@ function App() {
                         </table>
                       </div>
                       <p className="v1-flow-note">
-                        資料來源：證交所三大法人買賣超日報（T86），每天 14:00 隨 SEPA 體檢自動更新，僅針對已投資標的；首次開啟自動背景補抓前 6 個月。
-                        <span className="v1-flow-retry" onClick={handleFlowBackfill}>↻ 重新補抓</span>
+                        資料來源：證交所三大法人買賣超日報（T86），每天 14:00 隨 SEPA 體檢自動更新，僅針對已投資標的；首次開啟自動背景補抓前 6 個月；已有資料不重抓、只補缺。
+                        <span className="v1-flow-retry" onClick={() => handleFlowBackfill(true)}>↻ 強制重新抓取</span>
                       </p>
                     </div>
                   )}

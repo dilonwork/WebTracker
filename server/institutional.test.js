@@ -74,4 +74,65 @@ check('amount conversion matches mockup (2330 11/10)', () => {
   assert.ok(Math.abs(amt(-3313907, 2285) - (-75.72)) < 0.01);
 });
 
-console.log(`\nAll ${n} institutional tests passed.`);
+// fetchAndStoreDay：只補缺、不重抓；force 才重抓（假 DB，不需 PostgreSQL）
+// 2026/11/10 為交易日（T86 有資料）；假 DB 的 upsert 只計數、不寫入
+const { fetchAndStoreDay } = require('./institutional');
+function fakeDb(storedIds) {
+  const calls = { check: 0, upsert: 0, upsertedIds: [] };
+  return {
+    calls,
+    query: async (sql, params) => {
+      if (sql.includes('SELECT account_id')) {
+        calls.check++;
+        return { rows: storedIds.map((id) => ({ account_id: id })) };
+      }
+      if (sql.includes('INSERT INTO fin_institutional_flow')) {
+        calls.upsert++;
+        calls.upsertedIds.push(params[0]);
+        return { rows: [] };
+      }
+      throw new Error('unexpected query: ' + sql.slice(0, 60));
+    },
+  };
+}
+const ACCOUNTS = [
+  { id: 3, code: '2330' },
+  { id: 5, code: '0050' },
+];
+const CLOSES = { '2330': { '2026-11-10': 2285 }, '0050': { '2026-11-10': 97.45 } };
+
+(async () => {
+  // 兩帳戶都有該日資料 -> skipped，不抓 T86、不寫入
+  {
+    const db = fakeDb([3, 5]);
+    const r = await fetchAndStoreDay(db, ACCOUNTS, CLOSES, '2026-11-10');
+    assert.strictEqual(r, 'skipped');
+    assert.strictEqual(db.calls.upsert, 0);
+    n++;
+    console.log('✓ fetchAndStoreDay skips fully-covered day');
+  }
+  // 只有 2330 有，0050 缺 -> 只補 0050（抓一次 T86、只寫一筆）
+  {
+    const db = fakeDb([3]);
+    const r = await fetchAndStoreDay(db, ACCOUNTS, CLOSES, '2026-11-10');
+    assert.strictEqual(r, 'stored');
+    assert.strictEqual(db.calls.upsert, 1);
+    assert.deepStrictEqual(db.calls.upsertedIds, [5]);
+    n++;
+    console.log('✓ fetchAndStoreDay fills only the missing account');
+  }
+  // force=true：兩帳戶都有仍重抓重寫
+  {
+    const db = fakeDb([3, 5]);
+    const r = await fetchAndStoreDay(db, ACCOUNTS, CLOSES, '2026-11-10', true);
+    assert.strictEqual(r, 'stored');
+    assert.strictEqual(db.calls.upsert, 2);
+    assert.deepStrictEqual(db.calls.upsertedIds.sort(), [3, 5]);
+    n++;
+    console.log('✓ fetchAndStoreDay force re-fetches everything');
+  }
+  console.log(`\nAll ${n} institutional tests passed.`);
+})().catch((e) => {
+  console.error('FAIL:', e.message);
+  process.exit(1);
+});
