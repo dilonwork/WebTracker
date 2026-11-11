@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>法人分析 — WebTracker Mockup v2</title>
+<style>
+  :root {
+    --bg-app: #09061c; --surface-glass: rgba(255,255,255,0.03);
+    --border-glass: rgba(255,255,255,0.08); --text-primary: #fff;
+    --text-secondary: #94a3b8; --accent-primary: #6366f1; --accent-secondary: #a855f7;
+    --accent-success: #10b981; --accent-warning: #f59e0b; --accent-danger: #ef4444;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg-app); color: var(--text-primary);
+    font-family: 'Outfit','Inter',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing: antialiased; }
+  .app { min-height: 100vh; display: flex;
+    background: radial-gradient(circle at 10% 20%, #17103a 0%, #0b0722 50%, #03010b 100%); }
+  .sidebar { width: 230px; background: rgba(10,7,26,0.65); border-right: 1px solid var(--border-glass);
+    padding: 1.5rem 1rem; display: flex; flex-direction: column; gap: 0.4rem; flex-shrink: 0; }
+  .logo { display: flex; align-items: center; gap: 0.6rem; padding: 0.3rem 0.6rem 1.4rem; font-size: 1.15rem; font-weight: 700; }
+  .nav-item { padding: 0.65rem 0.8rem; border-radius: 0.6rem; color: var(--text-secondary);
+    cursor: pointer; font-size: 0.95rem; }
+  .nav-item:hover { background: rgba(255,255,255,0.05); color: #fff; }
+  .nav-item.active { color: #fff;
+    background: linear-gradient(135deg, rgba(99,102,241,0.25) 0%, rgba(168,85,247,0.25) 100%);
+    border: 1px solid rgba(99,102,241,0.35); }
+  .main { flex: 1; padding: 1.6rem 1.8rem; max-width: 860px; }
+  .crumb { color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.5rem; }
+  .crumb b { color: #fff; font-weight: 600; }
+  h1 { font-size: 1.5rem; margin-bottom: 1.1rem; }
+  h1 span { font-size: 0.85rem; color: var(--text-secondary); font-weight: 400; margin-left: 0.5rem; }
+  .stock-switch { display: flex; gap: 0.7rem; margin-bottom: 1.2rem; }
+  .stock-card { flex: 1; padding: 0.8rem 1rem; border-radius: 0.8rem; cursor: pointer;
+    background: var(--surface-glass); border: 1px solid var(--border-glass); }
+  .stock-card.active { border-color: var(--accent-primary);
+    background: linear-gradient(135deg, rgba(99,102,241,0.18) 0%, rgba(168,85,247,0.18) 100%); }
+  .stock-card .nm { font-weight: 700; font-size: 1rem; }
+  .stock-card .sub { color: var(--text-secondary); font-size: 0.82rem; margin-top: 0.15rem; }
+  .seg { display: inline-flex; background: rgba(255,255,255,0.05); border: 1px solid var(--border-glass);
+    border-radius: 0.6rem; padding: 0.2rem; margin-bottom: 1.1rem; }
+  .seg button { border: 0; background: transparent; color: var(--text-secondary); padding: 0.45rem 1.2rem;
+    border-radius: 0.45rem; cursor: pointer; font-size: 0.95rem; }
+  .seg button.active { background: var(--accent-primary); color: #fff; }
+  .cards { display: flex; gap: 0.7rem; margin-bottom: 1.2rem; flex-wrap: wrap; }
+  .card { flex: 1; min-width: 140px; background: var(--surface-glass); border: 1px solid var(--border-glass);
+    border-radius: 0.8rem; padding: 0.9rem 1rem; }
+  .card .lb { color: var(--text-secondary); font-size: 0.82rem; }
+  .card .vl { font-size: 1.3rem; font-weight: 700; margin-top: 0.25rem; }
+  .card .vl.pos { color: var(--accent-success); } .card .vl.neg { color: var(--accent-danger); }
+  .card .st { font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.2rem; }
+  .panel { background: var(--surface-glass); border: 1px solid var(--border-glass);
+    border-radius: 0.9rem; padding: 1.1rem 1.2rem; margin-bottom: 1.2rem; }
+  .panel h2 { font-size: 1rem; margin-bottom: 0.9rem; }
+  .panel h2 span { color: var(--text-secondary); font-size: 0.8rem; font-weight: 400; }
+  .legend { display: flex; gap: 1.1rem; font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 0.6rem; flex-wrap: wrap; }
+  .dot { display: inline-block; width: 0.65rem; height: 0.65rem; border-radius: 2px; margin-right: 0.35rem; vertical-align: middle; }
+  .dot.line { height: 3px; border-radius: 2px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  th { text-align: right; color: var(--text-secondary); font-weight: 500; padding: 0.45rem 0.25rem;
+    border-bottom: 1px solid var(--border-glass); }
+  th:first-child, td:first-child { text-align: left; }
+  td { text-align: right; padding: 0.55rem 0.25rem; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  td.pos { color: var(--accent-success); } td.neg { color: var(--accent-danger); }
+  .note { color: var(--text-secondary); font-size: 0.8rem; line-height: 1.6; }
+  .empty { color: var(--text-secondary); font-size: 0.9rem; padding: 1.2rem 0; text-align: center; }
+  @media (max-width: 700px) {
+    .sidebar { display: none; }
+    .main { padding: 1rem; }
+    .stock-switch { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="sidebar">
+    <div class="logo">📊 WebTracker</div>
+    <div class="nav-item">🏠 總覽</div>
+    <div class="nav-item">💰 帳戶水位維護</div>
+    <div class="nav-item active">🏦 法人分析</div>
+    <div class="nav-item">📝 需求清單</div>
+    <div class="nav-item">🔍 監控目標</div>
+  </div>
+  <div class="main">
+    <div class="crumb">帳戶水位維護 › <b id="crumbName">台積電</b> › 法人分析</div>
+    <h1>🏦 法人分析 <span>外資・投信・自營商買賣超趨勢</span></h1>
+
+    <div class="stock-switch" id="stockSwitch"></div>
+
+    <div class="seg">
+      <button id="btnDay" class="active" onclick="setMode('day')">按日</button>
+      <button id="btnMonth" onclick="setMode('month')">按月</button>
+    </div>
+
+    <div class="cards" id="sumCards"></div>
+
+    <div class="panel">
+      <h2 id="trendTitle">累計買賣超趨勢 <span>（億元，三大法人對照）</span></h2>
+      <div class="legend">
+        <span><i class="dot line" style="background:#6366f1"></i>外資</span>
+        <span><i class="dot line" style="background:#a855f7"></i>投信</span>
+        <span><i class="dot line" style="background:#f59e0b"></i>自營商</span>
+        <span><i class="dot line" style="background:#94a3b8"></i>三大法人合計（虛線）</span>
+      </div>
+      <div id="trendChart"></div>
+    </div>
+
+    <div class="panel">
+      <h2 id="chartTitle">每日買賣超金額 <span>（億元）</span></h2>
+      <div class="legend">
+        <span><i class="dot" style="background:#6366f1"></i>外資</span>
+        <span><i class="dot" style="background:#a855f7"></i>投信</span>
+        <span><i class="dot" style="background:#f59e0b"></i>自營商</span>
+      </div>
+      <div id="chart"></div>
+    </div>
+
+    <div class="panel">
+      <h2 id="tableTitle">每日明細 <span>金額 = 買賣超股數 × 收盤價</span></h2>
+      <div id="tableWrap"></div>
+    </div>
+
+    <p class="note" id="footNote"></p>
+  </div>
+</div>
+
+<script>
+const DATA = {
+  '2330': { name: '台積電', code: '2330', shares: '1,970 股', days: [
+    { d: '11/06', close: 2135, f: -22844481, t: 4669484, s: 8701821, tot: -9473176 },
+    { d: '11/09', close: 2235, f: -8758880, t: 3828210, s: -764078, tot: -5694748 },
+    { d: '11/10', close: 2285, f: -8181770, t: 5634335, s: -766472, tot: -3313907 },
+  ]},
+  '0050': { name: '元大台灣50', code: '0050', shares: '3,000 股', days: [
+    { d: '11/06', close: 92.5, f: -88713607, t: 8361000, s: -457625140, tot: -537977747 },
+    { d: '11/09', close: 97.45, f: -38281040, t: 7000000, s: -65783661, tot: -97064701 },
+    { d: '11/10', close: 97.45, est: true, f: 206481, t: 8952000, s: -24720295, tot: -15561814 },
+  ]},
+};
+let cur = '2330', mode = 'day';
+const yi = v => (v / 1e8);
+const fmt = v => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1);
+const cls = v => v >= 0 ? 'pos' : 'neg';
+const SERIES = [
+  { key: 'f', label: '外資', color: '#6366f1' },
+  { key: 't', label: '投信', color: '#a855f7' },
+  { key: 's', label: '自營商', color: '#f59e0b' },
+  { key: 'tot', label: '三大法人合計', color: '#94a3b8', dash: true },
+];
+
+function streak(days, key) {
+  let n = 0, dir = Math.sign(days[days.length - 1][key]);
+  for (let i = days.length - 1; i >= 0; i--) {
+    if (Math.sign(days[i][key]) === dir && days[i][key] !== 0) n++; else break;
+  }
+  return n > 0 ? (dir > 0 ? '連買 ' : '連賣 ') + n + ' 日' : '—';
+}
+
+function renderSwitch() {
+  document.getElementById('stockSwitch').innerHTML = Object.entries(DATA).map(([code, s]) =>
+    `<div class="stock-card ${code === cur ? 'active' : ''}" onclick="cur='${code}';render()">
+      <div class="nm">${s.name} <span style="color:var(--text-secondary);font-weight:400">${code}</span></div>
+      <div class="sub">持有 ${s.shares}・點我切換 ›</div>
+    </div>`).join('');
+}
+
+function render() {
+  const s = DATA[cur];
+  document.getElementById('crumbName').textContent = s.name;
+  renderSwitch();
+  const days = s.days;
+  const sum = k => days.reduce((a, d) => a + yi(d[k] * d.close), 0);
+  const sums = { f: sum('f'), t: sum('t'), s: sum('s'), tot: sum('tot') };
+  const cardDefs = [
+    { k: 'f', lb: `外資累計（近 ${days.length} 日）` },
+    { k: 't', lb: `投信累計（近 ${days.length} 日）` },
+    { k: 's', lb: `自營商累計（近 ${days.length} 日）` },
+    { k: 'tot', lb: '三大法人合計' },
+  ];
+  document.getElementById('sumCards').innerHTML = cardDefs.map(c =>
+    `<div class="card"><div class="lb">${c.lb}</div>
+      <div class="vl ${cls(sums[c.k])}">${fmt(sums[c.k])} 億</div>
+      <div class="st">${c.k === 'tot' ? '外資＋投信＋自營商' : streak(days, c.k)}</div></div>`).join('');
+
+  // 累計趨勢線圖（按日才有意義；按月只有一個月，顯示提示）
+  if (mode === 'day') {
+    document.getElementById('trendTitle').innerHTML = `累計買賣超趨勢 <span>（億元，三大法人對照）</span>`;
+    const cum = {}; SERIES.forEach(sr => { cum[sr.key] = []; let acc = 0;
+      days.forEach(d => { acc += yi(d[sr.key] * d.close); cum[sr.key].push(acc); }); });
+    renderTrend(days.map(d => d.d), cum);
+  } else {
+    document.getElementById('trendTitle').innerHTML = `累計買賣超趨勢 <span>（按月）</span>`;
+    document.getElementById('trendChart').innerHTML =
+      `<div class="empty">目前只有 2026 年 11 月局部資料，累積滿 2 個月後這裡會出現月趨勢線。<br>正式版補抓前 6 個月後，就能直接比較各月三大法人的走向。</div>`;
+  }
+
+  if (mode === 'day') {
+    document.getElementById('chartTitle').innerHTML = `每日買賣超金額 <span>（億元）</span>`;
+    document.getElementById('tableTitle').innerHTML = `每日明細 <span>金額 = 買賣超股數 × 收盤價</span>`;
+    renderBars(days.map(d => ({ label: d.d, f: yi(d.f * d.close), t: yi(d.t * d.close), s: yi(d.s * d.close) })));
+    document.getElementById('tableWrap').innerHTML = `<table>
+      <tr><th>日期</th><th>收盤</th><th>外資</th><th>投信</th><th>自營商</th><th>三大法人</th></tr>
+      ${[...days].reverse().map(d => `<tr>
+        <td>${d.d}</td><td>${d.close}${d.est ? ' *' : ''}</td>
+        <td class="${cls(d.f)}">${fmt(yi(d.f * d.close))} 億</td>
+        <td class="${cls(d.t)}">${fmt(yi(d.t * d.close))} 億</td>
+        <td class="${cls(d.s)}">${fmt(yi(d.s * d.close))} 億</td>
+        <td class="${cls(d.tot)}">${fmt(yi(d.tot * d.close))} 億</td></tr>`).join('')}
+      </table>`;
+  } else {
+    document.getElementById('chartTitle').innerHTML = `按月彙總 <span>（億元）</span>`;
+    document.getElementById('tableTitle').innerHTML = `每月彙總 <span>2026 年 11 月僅含已抓到的 ${days.length} 個交易日</span>`;
+    renderBars([{ label: '2026-11', f: sums.f, t: sums.t, s: sums.s }]);
+    document.getElementById('tableWrap').innerHTML = `<table>
+      <tr><th>月份</th><th>交易日</th><th>外資</th><th>投信</th><th>自營商</th><th>三大法人</th></tr>
+      <tr><td>2026-11</td><td>${days.length} 日</td>
+        <td class="${cls(sums.f)}">${fmt(sums.f)} 億</td>
+        <td class="${cls(sums.t)}">${fmt(sums.t)} 億</td>
+        <td class="${cls(sums.s)}">${fmt(sums.s)} 億</td>
+        <td class="${cls(sums.tot)}">${fmt(sums.tot)} 億</td></tr>
+      </table>`;
+  }
+  document.getElementById('footNote').innerHTML =
+    `資料來源：證交所三大法人買賣超日報（T86），每天 14:00 隨 SEPA 體檢自動抓取，僅針對已投資標的；` +
+    `首次開啟自動背景補抓前 6 個月。金額由買賣超股數 × 當日收盤價換算；趨勢圖為期間累計值。` +
+    (cur === '0050' ? `<br>* 0050 的 11/10 收盤價 Yahoo 缺值，暫以 11/09 收盤價估算。` : ``);
+}
+
+function renderBars(rows) {
+  const W = 640, H = 260, padL = 55, padB = 28, padT = 14;
+  const maxV = Math.max(...rows.flatMap(r => [Math.abs(r.f), Math.abs(r.t), Math.abs(r.s)]), 1);
+  const y0 = padT + (H - padT - padB) / 2;
+  const sc = (H - padT - padB) / 2 / maxV;
+  const bw = 24, gap = 10;
+  const slotW = Math.min((W - padL - 20) / rows.length, 190);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">`;
+  svg += `<line x1="${padL}" y1="${y0}" x2="${W - 10}" y2="${y0}" stroke="rgba(255,255,255,0.25)"/>`;
+  svg += `<text x="${padL - 8}" y="${y0 - 6}" fill="#94a3b8" font-size="11" text-anchor="end">0</text>`;
+  svg += `<text x="${padL - 8}" y="${padT + 4}" fill="#94a3b8" font-size="11" text-anchor="end">+${maxV.toFixed(0)}</text>`;
+  svg += `<text x="${padL - 8}" y="${H - 6}" fill="#94a3b8" font-size="11" text-anchor="end">−${maxV.toFixed(0)}</text>`;
+  rows.forEach((r, i) => {
+    const cx = padL + slotW * i + slotW / 2;
+    [['f', '#6366f1'], ['t', '#a855f7'], ['s', '#f59e0b']].forEach(([k, col], j) => {
+      const v = r[k], h = Math.abs(v) * sc, x = cx - (bw * 3 + gap * 2) / 2 + j * (bw + gap);
+      const y = v >= 0 ? y0 - h : y0;
+      svg += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw}" height="${Math.max(h, 2).toFixed(1)}" rx="3" fill="${col}" opacity="0.95"/>`;
+      svg += `<text x="${(x + bw / 2).toFixed(1)}" y="${(v >= 0 ? y - 5 : y + h + 13).toFixed(1)}" fill="${col}" font-size="10.5" text-anchor="middle">${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(0)}</text>`;
+    });
+    svg += `<text x="${cx.toFixed(1)}" y="${H - 8}" fill="#94a3b8" font-size="12" text-anchor="middle">${r.label}</text>`;
+  });
+  svg += `</svg>`;
+  document.getElementById('chart').innerHTML = svg;
+}
+
+function renderTrend(labels, cum) {
+  const W = 640, H = 260, padL = 55, padR = 70, padB = 28, padT = 16;
+  const all = Object.values(cum).flat();
+  let lo = Math.min(...all, 0), hi = Math.max(...all, 0);
+  const pad = (hi - lo) * 0.12 || 10; lo -= pad; hi += pad;
+  const x = i => padL + (W - padL - padR) * (labels.length === 1 ? 0.5 : i / (labels.length - 1));
+  const y = v => padT + (H - padT - padB) * (1 - (v - lo) / (hi - lo));
+  const y0 = y(0);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">`;
+  svg += `<line x1="${padL}" y1="${y0.toFixed(1)}" x2="${W - padR}" y2="${y0.toFixed(1)}" stroke="rgba(255,255,255,0.25)"/>`;
+  svg += `<text x="${padL - 8}" y="${(y0 - 6).toFixed(1)}" fill="#94a3b8" font-size="11" text-anchor="end">0</text>`;
+  svg += `<text x="${padL - 8}" y="${padT + 4}" fill="#94a3b8" font-size="11" text-anchor="end">+${hi.toFixed(0)}</text>`;
+  svg += `<text x="${padL - 8}" y="${(H - padB + 14).toFixed(1)}" fill="#94a3b8" font-size="11" text-anchor="end">${lo.toFixed(0)}</text>`;
+  SERIES.forEach(sr => {
+    const pts = cum[sr.key].map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+    svg += `<polyline points="${pts}" fill="none" stroke="${sr.color}" stroke-width="2.5" ${sr.dash ? 'stroke-dasharray="6 4"' : ''} stroke-linejoin="round" stroke-linecap="round"/>`;
+    cum[sr.key].forEach((v, i) => {
+      svg += `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="4" fill="${sr.color}" stroke="#09061c" stroke-width="1.5"/>`;
+    });
+    const last = cum[sr.key][cum[sr.key].length - 1];
+    svg += `<text x="${(x(labels.length - 1) + 10).toFixed(1)}" y="${(y(last) + 4).toFixed(1)}" fill="${sr.color}" font-size="11.5" font-weight="600">${sr.label} ${last >= 0 ? '+' : '−'}${Math.abs(last).toFixed(0)}億</text>`;
+  });
+  labels.forEach((lb, i) => {
+    svg += `<text x="${x(i).toFixed(1)}" y="${H - 8}" fill="#94a3b8" font-size="12" text-anchor="middle">${lb}</text>`;
+  });
+  svg += `</svg>`;
+  document.getElementById('trendChart').innerHTML = svg;
+}
+
+function setMode(m) {
+  mode = m;
+  document.getElementById('btnDay').classList.toggle('active', m === 'day');
+  document.getElementById('btnMonth').classList.toggle('active', m === 'month');
+  render();
+}
+render();
+</script>
+</body>
+</html>

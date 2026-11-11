@@ -167,6 +167,7 @@ WebTracker 部署到對外 VM 後，任何人知道網址都打得開，因此�
 │   └── stripe-prototype.test.js  # 原型單元測試（假 httpPost，不發真實請求，`node server/stripe-prototype.test.js`）
 │   └── migrate.js     # 資料庫遷移
 ├── docs/images/       # 架構圖
+├── public/draft/      # 草稿區：尚未正式上線的頁面 mockup（`mockup-<功能>.html`），build 後可直接用瀏覽器開 `http://<主機>:8080/draft/<檔名>`（需先登入）；正式上線後刪掉對應 mockup
 ├── Startup.sh         # 一鍵啟動腳本
 └── index.html
 ```
