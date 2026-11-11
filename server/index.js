@@ -450,6 +450,78 @@ app.delete('/api/financials/accounts/:id/sepa-decision', async (req, res) => {
   }
 });
 
+// 4.63. 法人分析：已投資的上市台股＋各帳戶資料覆蓋範圍
+app.get('/api/financials/flow/accounts', async (req, res) => {
+  try {
+    const { getTwAccounts, getFlowCoverage, backfillState } = require('./institutional');
+    const accounts = await getTwAccounts(db);
+    const coverage = await getFlowCoverage(db);
+    res.json({
+      accounts: accounts.map((a) => ({
+        id: a.id, name: a.name, ticker: a.ticker, shares: Number(a.shares),
+        coverage: coverage[a.id] || null,
+      })),
+      backfill: backfillState,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4.64. 法人分析：某帳戶的三大法人買賣超明細（金額 = 股數 × 收盤價，單位：億元）
+// 無資料時自動在背景補抓前 6 個月，前端輪詢 backfill 狀態即可
+app.get('/api/financials/accounts/:id/flow', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { backfillFlow, backfillState } = require('./institutional');
+    const { rows } = await db.query(
+      `SELECT trade_date, close, foreign_net_shares, trust_net_shares, dealer_net_shares, total_net_shares
+       FROM fin_institutional_flow WHERE account_id = $1 ORDER BY trade_date ASC`,
+      [id]
+    );
+    let backfillStarted = false;
+    if (rows.length === 0 && !backfillState.running) {
+      await backfillFlow(db);
+      backfillStarted = true;
+    }
+    const fmtDate = (d) => {
+      const t = new Date(d);
+      return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+    };
+    const data = rows.map((r) => {
+      const close = r.close == null ? null : Number(r.close);
+      const amt = (s) => (s == null || close == null) ? null : (Number(s) * close) / 1e8;
+      const sh = (s) => (s == null ? null : Number(s));
+      return {
+        trade_date: fmtDate(r.trade_date),
+        close,
+        foreign_shares: sh(r.foreign_net_shares),
+        trust_shares: sh(r.trust_net_shares),
+        dealer_shares: sh(r.dealer_net_shares),
+        total_shares: sh(r.total_net_shares),
+        foreign_amt: amt(r.foreign_net_shares),
+        trust_amt: amt(r.trust_net_shares),
+        dealer_amt: amt(r.dealer_net_shares),
+        total_amt: amt(r.total_net_shares),
+      };
+    });
+    res.json({ rows: data, backfill: backfillState, backfillStarted });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4.65. 法人分析：手動觸發背景補抓前 6 個月
+app.post('/api/financials/flow/backfill', async (req, res) => {
+  try {
+    const { backfillFlow, backfillState } = require('./institutional');
+    const r = await backfillFlow(db);
+    res.json({ ...r, backfill: backfillState });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 4.6. Manually trigger Yahoo stock price refresh
 app.post('/api/financials/stocks/refresh', async (req, res) => {  try {
     const { updateStockPrices } = require('./stock');

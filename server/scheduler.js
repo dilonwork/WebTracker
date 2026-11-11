@@ -124,12 +124,19 @@ function startStockScheduler() {
 }
 
 // Daily SEPA trend-template check (14:00 Phoenix = after TW close 13:30 Taipei and US close 13:00 Phoenix)
+// 之後順便補抓三大法人買賣超最近 5 日（T86 當晚才公布，最新為前一交易日）
 function startSepaScheduler() {
   cron.schedule('0 14 * * *', async () => {
     try {
       await runSepaCheck();
     } catch (err) {
       console.error('[SEPA] Scheduled check error:', err.message);
+    }
+    try {
+      const { refreshDailyFlow } = require('./institutional');
+      await refreshDailyFlow(db);
+    } catch (err) {
+      console.error('[FLOW] Scheduled refresh error:', err.message);
     }
   }, {
     timezone: process.env.TZ || 'America/Phoenix'

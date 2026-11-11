@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, BarChart, Bar, CartesianGrid } from 'recharts';
 import './App.css';
 
 interface TrackedPage {
@@ -69,7 +69,7 @@ const formatDateTime = (dateString: string) => {
 };
 
 function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'maintenance' | 'demands' | 'scraper'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'maintenance' | 'demands' | 'scraper' | 'flow'>('dashboard');
 
   // Database Data States
   const [accounts, setAccounts] = useState<FinancialAccount[]>([]);
@@ -851,6 +851,74 @@ function App() {
     }
   };
 
+  // 法人分析（三大法人買賣超，證交所 T86）
+  interface FlowRow {
+    trade_date: string; close: number | null;
+    foreign_shares: number | null; trust_shares: number | null;
+    dealer_shares: number | null; total_shares: number | null;
+    foreign_amt: number | null; trust_amt: number | null;
+    dealer_amt: number | null; total_amt: number | null;
+  }
+  interface FlowAccount {
+    id: number; name: string; ticker: string; shares: number;
+    coverage: { earliest: string; latest: string; count: number } | null;
+  }
+  const [flowAccounts, setFlowAccounts] = useState<FlowAccount[]>([]);
+  const [flowAccountId, setFlowAccountId] = useState<number | null>(null);
+  const [flowRows, setFlowRows] = useState<FlowRow[]>([]);
+  const [flowBackfill, setFlowBackfill] = useState<any>(null);
+  const [flowLoading, setFlowLoading] = useState(false);
+  const [flowMode, setFlowMode] = useState<'day' | 'month'>('day');
+  const fetchFlowAccounts = () => {
+    fetch('/api/financials/flow/accounts')
+      .then(res => res.json())
+      .then(data => {
+        const list: FlowAccount[] = data.accounts || [];
+        setFlowAccounts(list);
+        setFlowBackfill(data.backfill || null);
+        if (list.length > 0) setFlowAccountId(prev => prev ?? list[0].id);
+      })
+      .catch(() => {});
+  };
+  const fetchFlowRows = (id: number, silent = false) => {
+    if (!silent) setFlowLoading(true);
+    fetch(`/api/financials/accounts/${id}/flow`)
+      .then(res => res.json())
+      .then(data => {
+        setFlowRows(data.rows || []);
+        setFlowBackfill(data.backfill || null);
+        setFlowLoading(false);
+      })
+      .catch(() => setFlowLoading(false));
+  };
+  const handleFlowBackfill = async () => {
+    await fetch('/api/financials/flow/backfill', { method: 'POST' });
+    if (flowAccountId != null) fetchFlowRows(flowAccountId);
+    fetchFlowAccounts();
+  };
+  // 從水位維護的股票展開區點進來
+  const openFlowFor = (accountId: number) => {
+    fetchFlowAccounts();
+    setFlowAccountId(accountId);
+    setActiveTab('flow');
+  };
+  useEffect(() => {
+    if (activeTab === 'flow' && flowAccounts.length === 0) fetchFlowAccounts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+  useEffect(() => {
+    if (activeTab !== 'flow' || flowAccountId == null) return;
+    fetchFlowRows(flowAccountId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, flowAccountId]);
+  // 背景補抓進行中時每 10 秒輪詢，直到有資料或補抓結束
+  useEffect(() => {
+    if (activeTab !== 'flow' || !flowBackfill?.running || flowAccountId == null) return;
+    const t = setInterval(() => fetchFlowRows(flowAccountId, true), 10000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, flowBackfill?.running, flowAccountId]);
+
   // 帳戶載入後，預抓各股票的未確認告警（列上徽章用）
   useEffect(() => {
     accounts.forEach(a => {
@@ -1108,6 +1176,12 @@ function App() {
             onClick={() => setActiveTab('maintenance')}
           >
             ⚙️ 帳戶水位維護
+          </button>
+          <button
+            className={`nav-item ${activeTab === 'flow' ? 'active' : ''}`}
+            onClick={() => setActiveTab('flow')}
+          >
+            🏦 法人分析
           </button>
           <button 
             className={`nav-item ${activeTab === 'demands' ? 'active' : ''}`}
@@ -1741,6 +1815,9 @@ function App() {
                                     </button>
                                   </div>
                                 )}
+                                <div className="v1-flow-entry" onClick={() => openFlowFor(acc.id)}>
+                                  📊 法人分析：外資・投信・自營商買賣超趨勢 ›
+                                </div>
                                 {realizedCache[acc.id] && realizedCache[acc.id].count > 0 && (
                                   <div className="v1-stock-row total">
                                     <span className="v1-label">已實現損益（{realizedCache[acc.id].count} 筆）</span>
@@ -1874,6 +1951,166 @@ function App() {
             })}
             {accounts.length === 0 && <p className="no-data-hint">尚未建立任何帳戶，點上方新增第一個部位。</p>}
 
+          </div>
+        )}
+
+
+        {/* TAB: 法人分析（三大法人買賣超） */}
+        {activeTab === 'flow' && (
+          <div className="tab-pane animate-fade-in v1-dash">
+            <div className="v1-greet">🏦 法人分析 · 外資・投信・自營商買賣超趨勢</div>
+            <div className="v1-flow-switch">
+              {flowAccounts.map(a => (
+                <div key={a.id} className={`v1-flow-card ${flowAccountId === a.id ? 'active' : ''}`} onClick={() => setFlowAccountId(a.id)}>
+                  <div className="nm">{a.name} <span>{a.ticker}</span></div>
+                  <div className="sub">持有 {Number(a.shares).toLocaleString('zh-TW')} 股{a.coverage ? ` · 資料 ${String(a.coverage.earliest).slice(0, 10)} ~ ${String(a.coverage.latest).slice(0, 10)}` : ' · 尚無資料'}</div>
+                </div>
+              ))}
+              {flowAccounts.length === 0 && <div className="v1-flow-empty">尚無上市台股持股（ticker 以 .TW 結尾且持有股數 &gt; 0）</div>}
+            </div>
+            {flowAccountId != null && (() => {
+              const DAY_WINDOW = 30;
+              const dayRows = flowRows.slice(-DAY_WINDOW);
+              const viewRows = flowMode === 'day'
+                ? dayRows.map(r => ({ label: r.trade_date.slice(5).replace('-', '/'), sub: r.close == null ? '—' : `$${r.close}`, ...r }))
+                : (() => {
+                    const m = new Map<string, any>();
+                    for (const r of flowRows) {
+                      const k = r.trade_date.slice(0, 7);
+                      const cur = m.get(k) || { label: k, sub: '', count: 0, foreign_amt: 0, trust_amt: 0, dealer_amt: 0, total_amt: 0 };
+                      cur.count++;
+                      cur.foreign_amt += r.foreign_amt ?? 0;
+                      cur.trust_amt += r.trust_amt ?? 0;
+                      cur.dealer_amt += r.dealer_amt ?? 0;
+                      cur.total_amt += r.total_amt ?? 0;
+                      m.set(k, cur);
+                    }
+                    return [...m.values()].sort((a, b) => a.label.localeCompare(b.label)).map(x => ({ ...x, sub: `${x.count} 個交易日` }));
+                  })();
+              const sumKey = (k: string) => viewRows.reduce((a, r: any) => a + (r[k] ?? 0), 0);
+              const sums = { foreign: sumKey('foreign_amt'), trust: sumKey('trust_amt'), dealer: sumKey('dealer_amt'), total: sumKey('total_amt') };
+              let cf = 0, ct = 0, cd = 0, ctot = 0;
+              const trend = viewRows.map((r: any) => {
+                cf += r.foreign_amt ?? 0; ct += r.trust_amt ?? 0; cd += r.dealer_amt ?? 0; ctot += r.total_amt ?? 0;
+                return { label: r.label, foreign: +cf.toFixed(1), trust: +ct.toFixed(1), dealer: +cd.toFixed(1), total: +ctot.toFixed(1) };
+              });
+              const bars = viewRows.map((r: any) => ({
+                label: r.label,
+                foreign: +(r.foreign_amt ?? 0).toFixed(1),
+                trust: +(r.trust_amt ?? 0).toFixed(1),
+                dealer: +(r.dealer_amt ?? 0).toFixed(1),
+              }));
+              const streak = (k: 'foreign_amt' | 'trust_amt' | 'dealer_amt') => {
+                if (!flowRows.length) return '—';
+                let n = 0;
+                const dir = Math.sign(flowRows[flowRows.length - 1][k] ?? 0);
+                for (let i = flowRows.length - 1; i >= 0; i--) {
+                  const v = flowRows[i][k] ?? 0;
+                  if (Math.sign(v) === dir && v !== 0) n++; else break;
+                }
+                return n > 0 ? `${dir > 0 ? '連買' : '連賣'} ${n} 日` : '—';
+              };
+              const fmtYi = (v: number) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}`;
+              const rangeLabel = flowMode === 'day' ? `近 ${viewRows.length} 個交易日` : `${viewRows.length} 個月`;
+              const tipFmt = (value: any, name: any): [string, string] => [`${Number(value) >= 0 ? '+' : '−'}${Math.abs(Number(value)).toFixed(1)} 億`, String(name ?? '')];
+              const tipStyle = { backgroundColor: '#1e293b', border: 'none', borderRadius: '10px', color: '#f8fafc', fontSize: 12 };
+              const axisTick = { fill: 'rgba(255,255,255,0.55)', fontSize: 11 };
+              return (
+                <div>
+                  <div className="v1-flow-seg">
+                    <button className={flowMode === 'day' ? 'active' : ''} onClick={() => setFlowMode('day')}>按日</button>
+                    <button className={flowMode === 'month' ? 'active' : ''} onClick={() => setFlowMode('month')}>按月</button>
+                  </div>
+                  {flowLoading ? (
+                    <div className="v1-flow-empty">載入中…</div>
+                  ) : flowRows.length === 0 ? (
+                    <div className="v1-flow-empty">
+                      {flowBackfill?.running
+                        ? `正在背景補抓前 6 個月資料…（${flowBackfill.done}/${flowBackfill.total || '?'} 日），補完自動顯示`
+                        : '尚無法人買賣超資料'}
+                      <button className="btn btn-secondary" onClick={handleFlowBackfill} style={{ marginLeft: '0.6rem' }}>↻ 補抓前 6 個月</button>
+                    </div>
+                  ) : (
+                    <div>
+                      {flowBackfill?.running && (
+                        <div className="v1-flow-progress">正在背景補抓更早的資料…（{flowBackfill.done}/{flowBackfill.total || '?'} 日）</div>
+                      )}
+                      <div className="v1-flow-cards">
+                        {[
+                          { lb: `外資累計（${rangeLabel}）`, v: sums.foreign, st: streak('foreign_amt') },
+                          { lb: `投信累計（${rangeLabel}）`, v: sums.trust, st: streak('trust_amt') },
+                          { lb: `自營商累計（${rangeLabel}）`, v: sums.dealer, st: streak('dealer_amt') },
+                          { lb: '三大法人合計', v: sums.total, st: '外資＋投信＋自營商' },
+                        ].map(c => (
+                          <div key={c.lb} className="v1-flow-sumcard">
+                            <div className="lb">{c.lb}</div>
+                            <div className={`vl ${c.v >= 0 ? 'pos' : 'neg'}`}>{fmtYi(c.v)} 億</div>
+                            <div className="st">{c.st}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="glass-panel v1-flow-panel">
+                        <h3>累計買賣超趨勢 <span>（億元，三大法人對照）</span></h3>
+                        <ResponsiveContainer width="100%" height={240}>
+                          <LineChart data={trend} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                            <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
+                            <XAxis dataKey="label" tick={axisTick} tickLine={false} axisLine={false} minTickGap={30} />
+                            <YAxis tick={axisTick} tickLine={false} axisLine={false} width={48} />
+                            <Tooltip contentStyle={tipStyle} formatter={tipFmt} />
+                            <Line type="monotone" dataKey="foreign" name="外資" stroke="#6366f1" strokeWidth={2} dot={false} />
+                            <Line type="monotone" dataKey="trust" name="投信" stroke="#a855f7" strokeWidth={2} dot={false} />
+                            <Line type="monotone" dataKey="dealer" name="自營商" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                            <Line type="monotone" dataKey="total" name="三大法人合計" stroke="#94a3b8" strokeWidth={2} strokeDasharray="6 4" dot={false} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <div className="glass-panel v1-flow-panel">
+                        <h3>{flowMode === 'day' ? '每日買賣超金額' : '每月買賣超金額'} <span>（億元）</span></h3>
+                        <ResponsiveContainer width="100%" height={220}>
+                          <BarChart data={bars} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                            <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
+                            <XAxis dataKey="label" tick={axisTick} tickLine={false} axisLine={false} minTickGap={30} />
+                            <YAxis tick={axisTick} tickLine={false} axisLine={false} width={48} />
+                            <Tooltip contentStyle={tipStyle} formatter={tipFmt} />
+                            <Bar dataKey="foreign" name="外資" fill="#6366f1" radius={[3, 3, 0, 0]} />
+                            <Bar dataKey="trust" name="投信" fill="#a855f7" radius={[3, 3, 0, 0]} />
+                            <Bar dataKey="dealer" name="自營商" fill="#f59e0b" radius={[3, 3, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <div className="glass-panel v1-flow-panel">
+                        <h3>{flowMode === 'day' ? '每日明細' : '每月彙總'} <span>金額 = 買賣超股數 × 收盤價</span></h3>
+                        <table className="v1-flow-table">
+                          <thead>
+                            <tr>
+                              <th>{flowMode === 'day' ? '日期' : '月份'}</th>
+                              <th>{flowMode === 'day' ? '收盤' : '交易日'}</th>
+                              <th>外資</th><th>投信</th><th>自營商</th><th>三大法人</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[...viewRows].reverse().map((r: any) => (
+                              <tr key={r.label}>
+                                <td>{r.label}</td>
+                                <td>{r.sub}</td>
+                                <td className={r.foreign_amt >= 0 ? 'pos' : 'neg'}>{fmtYi(r.foreign_amt ?? 0)} 億</td>
+                                <td className={r.trust_amt >= 0 ? 'pos' : 'neg'}>{fmtYi(r.trust_amt ?? 0)} 億</td>
+                                <td className={r.dealer_amt >= 0 ? 'pos' : 'neg'}>{fmtYi(r.dealer_amt ?? 0)} 億</td>
+                                <td className={r.total_amt >= 0 ? 'pos' : 'neg'}>{fmtYi(r.total_amt ?? 0)} 億</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <p className="v1-flow-note">
+                        資料來源：證交所三大法人買賣超日報（T86），每天 14:00 隨 SEPA 體檢自動更新，僅針對已投資標的；首次開啟自動背景補抓前 6 個月。
+                        <span className="v1-flow-retry" onClick={handleFlowBackfill}>↻ 重新補抓</span>
+                      </p>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
 

@@ -150,6 +150,22 @@ const initDb = async () => {
       )
     `);
 
+    // 三大法人買賣超（證交所 T86 日報；僅上市台股）：股數存原值，金額由股數 × 收盤價換算
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS fin_institutional_flow (
+        id SERIAL PRIMARY KEY,
+        account_id INTEGER REFERENCES fin_accounts(id) ON DELETE CASCADE,
+        trade_date DATE NOT NULL,
+        close NUMERIC(15, 4),
+        foreign_net_shares BIGINT,
+        trust_net_shares BIGINT,
+        dealer_net_shares BIGINT,
+        total_net_shares BIGINT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (account_id, trade_date)
+      )
+    `);
+
     // Agent 總開關與白名單：六個開關＋兩個 D 級金額上限存 DB（改了立即生效，不用重啟）
     // value 是 BOOLEAN 欄位（開關用）；value_num 是 NUMERIC 欄位（金額上限用，預設 0）
     await pool.query(`
