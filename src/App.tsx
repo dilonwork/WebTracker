@@ -69,7 +69,7 @@ const formatDateTime = (dateString: string) => {
 };
 
 function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'maintenance' | 'demands' | 'scraper' | 'flow'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'maintenance' | 'demands' | 'scraper' | 'flow' | 'settings'>('dashboard');
 
   // Database Data States
   const [accounts, setAccounts] = useState<FinancialAccount[]>([]);
@@ -1176,6 +1176,12 @@ function App() {
             📊 總覽與 AI 診斷
           </button>
           <button 
+            className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`}
+            onClick={() => setActiveTab('settings')}
+          >
+            🛠️ 設定
+          </button>
+          <button 
             className={`nav-item ${activeTab === 'maintenance' ? 'active' : ''}`}
             onClick={() => setActiveTab('maintenance')}
           >
@@ -1385,6 +1391,16 @@ function App() {
                 </details>
               )}
             </div>
+          </div>
+        )}
+
+        {/* TAB: SETTINGS */}
+        {activeTab === 'settings' && (
+          <div className="tab-pane animate-fade-in v1-dash">
+            <div className="v1-maint-head">
+              <h1>🛠️ 設定</h1>
+              <p>Agent 總開關、白名單、最高權限與紙上交易設定。</p>
+            </div>
 
             {/* Agent 總開關與白名單 */}
             <div className="v1-sec">
@@ -1516,7 +1532,6 @@ function App() {
             </div>
           </div>
         )}
-
 
         {/* TAB 2: MAINTENANCE */}
         {activeTab === 'maintenance' && (
